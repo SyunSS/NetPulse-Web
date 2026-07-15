@@ -24,13 +24,10 @@ FROM node:22-slim AS frontend-builder
 
 WORKDIR /build
 
-RUN npm install -g pnpm
-
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN pnpm install --no-frozen-lockfile
+RUN npm install -g pnpm@10
 
 COPY frontend/ ./
-RUN pnpm build
+RUN pnpm install --no-frozen-lockfile && pnpm build
 
 # ====== 阶段3: 运行镜像 ======
 FROM debian:bookworm-slim
