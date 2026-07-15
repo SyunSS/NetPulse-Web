@@ -24,6 +24,10 @@ services:
     environment:
       - RUST_LOG=info,netpulse_web=debug
       - CHROME_PATH=/usr/bin/chromium
+      # 容器内强制使用绝对路径
+      - NETPULSE__DATABASE__PATH=/app/data/netpulse.db
+      - NETPULSE__STORAGE__SCREENSHOT_DIR=/app/data/screenshots
+      - NETPULSE__STORAGE__EXCEL_DIR=/app/data/excel
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
       interval: 30s
