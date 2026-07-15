@@ -87,6 +87,7 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             page_title TEXT,
             screenshot_path TEXT,
             error_msg TEXT,
+            test_count INTEGER DEFAULT 1,
             created_at TEXT NOT NULL,
             FOREIGN KEY (task_id) REFERENCES test_task(id)
         );
@@ -107,6 +108,7 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             file_size INTEGER,
             success INTEGER DEFAULT 1,
             error_msg TEXT,
+            test_count INTEGER DEFAULT 1,
             created_at TEXT NOT NULL,
             FOREIGN KEY (task_id) REFERENCES test_task(id)
         );
@@ -135,6 +137,7 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             screenshot_path TEXT,
             page_title TEXT,
             error_msg TEXT,
+            test_count INTEGER DEFAULT 1,
             created_at TEXT NOT NULL,
             FOREIGN KEY (task_id) REFERENCES test_task(id)
         );
@@ -216,6 +219,7 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             jitter_ms REAL,
             success INTEGER DEFAULT 1,
             error_msg TEXT,
+            test_count INTEGER DEFAULT 1,
             created_at TEXT NOT NULL,
             FOREIGN KEY (task_id) REFERENCES test_task(id)
         );
@@ -226,6 +230,34 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         sqlx::query(sql).execute(pool).await?;
     }
 
+    // 增量迁移：给已有数据库补 test_count 列
+    add_column_if_missing(pool, "website_result", "test_count", "INTEGER DEFAULT 1").await?;
+    add_column_if_missing(pool, "download_result", "test_count", "INTEGER DEFAULT 1").await?;
+    add_column_if_missing(pool, "video_result", "test_count", "INTEGER DEFAULT 1").await?;
+    add_column_if_missing(pool, "ping_result", "test_count", "INTEGER DEFAULT 1").await?;
+
     info!("数据库迁移完成（{} 张表）", 11);
+    Ok(())
+}
+
+/// 安全地添加列（如果列不存在）
+async fn add_column_if_missing(
+    pool: &SqlitePool,
+    table: &str,
+    column: &str,
+    col_def: &str,
+) -> anyhow::Result<()> {
+    let exists: i32 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
+    )
+    .bind(table)
+    .bind(column)
+    .fetch_one(pool)
+    .await?;
+    if exists == 0 {
+        let sql = format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, col_def);
+        sqlx::query(&sql).execute(pool).await?;
+        info!("增量迁移: 为 {}.{} 添加列", table, column);
+    }
     Ok(())
 }

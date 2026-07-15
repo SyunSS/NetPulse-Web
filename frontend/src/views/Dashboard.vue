@@ -29,7 +29,10 @@ const trendOption = ref<any>({
   xAxis: {
     type: 'category',
     data: [],
-    axisLabel: { color: '#888', formatter: (v: string) => v.substring(11, 19) }
+    axisLabel: { color: '#888', formatter: (v: string) => {
+      const d = new Date(v);
+      return d.toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+    } }
   },
   yAxis: { type: 'value', name: 'ms', nameTextStyle: { color: '#888' }, axisLabel: { color: '#888' }, splitLine: { lineStyle: { color: 'rgba(128,128,128,0.1)' } } },
   series: [

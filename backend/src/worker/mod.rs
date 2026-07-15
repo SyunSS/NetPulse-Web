@@ -264,8 +264,8 @@ async fn save_website_result(db: &SqlitePool, result: &WebsiteResult) -> anyhow:
             id, task_id, url, dns_time_ms, dns_success, tcp_time_ms, tls_time_ms,
             http_status, ttfb_ms, fp_ms, fcp_ms, dom_content_loaded_ms, load_event_ms,
             page_open_time_ms, first_paint_ms, resource_count, resource_total_size,
-            final_url, page_title, screenshot_path, error_msg, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            final_url, page_title, screenshot_path, error_msg, test_count, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(&result.id)
     .bind(&result.task_id)
@@ -288,6 +288,7 @@ async fn save_website_result(db: &SqlitePool, result: &WebsiteResult) -> anyhow:
     .bind(&result.page_title)
     .bind(&result.screenshot_path)
     .bind(&result.error_msg)
+    .bind(result.test_count)
     .bind(&result.created_at)
     .execute(db)
     .await?;
@@ -572,8 +573,8 @@ async fn save_video_result(db: &SqlitePool, result: &VideoResult) -> anyhow::Res
             id, task_id, url, platform, dns_time_ms, dns_success, tcp_time_ms, http_response_ms,
             first_play_time_ms, buffer_count, total_buffer_time_ms, buffer_rate,
             play_success, video_download_speed, video_size, video_duration_ms,
-            dropped_frames, decoded_frames, screenshot_path, page_title, error_msg, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            dropped_frames, decoded_frames, screenshot_path, page_title, error_msg, test_count, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(&result.id)
     .bind(&result.task_id)
@@ -596,6 +597,7 @@ async fn save_video_result(db: &SqlitePool, result: &VideoResult) -> anyhow::Res
     .bind(&result.screenshot_path)
     .bind(&result.page_title)
     .bind(&result.error_msg)
+    .bind(result.test_count)
     .bind(&result.created_at)
     .execute(db)
     .await?;
@@ -670,13 +672,13 @@ async fn run_download_task(
 
 async fn save_download_result(db: &SqlitePool, result: &DownloadResult) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO download_result (id, task_id, url, dns_time_ms, dns_success, tcp_time_ms, download_speed, avg_speed, peak_speed, download_time_ms, file_size, success, error_msg, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO download_result (id, task_id, url, dns_time_ms, dns_success, tcp_time_ms, download_speed, avg_speed, peak_speed, download_time_ms, file_size, success, error_msg, test_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&result.id).bind(&result.task_id).bind(&result.url)
     .bind(result.dns_time_ms).bind(result.dns_success).bind(result.tcp_time_ms)
     .bind(result.download_speed).bind(result.avg_speed).bind(result.peak_speed)
     .bind(result.download_time_ms).bind(result.file_size).bind(result.success)
-    .bind(&result.error_msg).bind(&result.created_at)
+    .bind(&result.error_msg).bind(result.test_count).bind(&result.created_at)
     .execute(db).await?;
     Ok(())
 }
@@ -740,11 +742,11 @@ async fn run_ping_task(
 
 async fn save_ping_result(db: &SqlitePool, result: &PingResult) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO ping_result (id, task_id, host, avg_latency_ms, packet_loss_rate, jitter_ms, success, error_msg, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO ping_result (id, task_id, host, avg_latency_ms, packet_loss_rate, jitter_ms, success, error_msg, test_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&result.id).bind(&result.task_id).bind(&result.host)
     .bind(result.avg_latency_ms).bind(result.packet_loss_rate).bind(result.jitter_ms)
-    .bind(result.success).bind(&result.error_msg).bind(&result.created_at)
+    .bind(result.success).bind(&result.error_msg).bind(result.test_count).bind(&result.created_at)
     .execute(db).await?;
     Ok(())
 }

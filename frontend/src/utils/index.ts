@@ -18,9 +18,25 @@ export function formatMs(ms: number): string {
 }
 
 /**
- * 格式化时间戳
+ * 格式化时间戳（强制 Asia/Shanghai 时区，与服务端时区无关）
  */
 export function formatTime(dateStr: string): string {
   const d = new Date(dateStr)
-  return d.toLocaleString('zh-CN')
+  return d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+}
+
+/**
+ * 格式化时间戳，仅时分秒
+ */
+export function formatTimeShort(dateStr: string): string {
+  const d = new Date(dateStr)
+  return d.toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
+}
+
+/**
+ * 格式化日期（短）
+ */
+export function formatDateShort(dateStr: string): string {
+  const d = new Date(dateStr)
+  return d.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' })
 }
