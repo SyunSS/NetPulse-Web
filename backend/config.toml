@@ -1,0 +1,52 @@
+# NetPulse Web 配置文件
+
+[server]
+host = "0.0.0.0"
+port = 3000
+
+[database]
+path = "./data/netpulse.db"
+
+[logging]
+level = "info"
+file_dir = "./logs"
+
+[chrome]
+path = "/usr/bin/chromium"
+headless = true
+
+[task]
+concurrency = 5
+timeout_seconds = 120
+
+[storage]
+screenshot_dir = "./data/screenshots"
+excel_dir = "./data/excel"
+
+[jwt]
+secret = "netpulse-jwt-secret-change-in-production"
+expiration_hours = 24
+
+# 视频平台配置（可自定义扩展，新增平台只需加一条）
+[[video_platforms]]
+name = "youtube"
+url_keywords = ["youtube.com", "youtu.be"]
+video_selector = "video.html5-main-video"
+wait_seconds = 3
+
+[[video_platforms]]
+name = "bilibili"
+url_keywords = ["bilibili.com", "b23.tv"]
+video_selector = "video.bpx-player-video"
+wait_seconds = 5
+
+[[video_platforms]]
+name = "netflix"
+url_keywords = ["netflix.com"]
+detect_only = true
+
+[[video_platforms]]
+name = "html5"
+url_keywords = []
+video_selector = "video"
+wait_seconds = 1
