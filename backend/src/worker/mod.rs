@@ -170,6 +170,7 @@ async fn run_website_task(
                     screenshot_path: None,
                     error_msg: Some(e.to_string()),
                     created_at: Utc::now().to_rfc3339(),
+                    test_count: None,
                 };
                 save_website_result(&db, &failed_result).await.ok();
             }
@@ -273,6 +274,7 @@ async fn test_single_url(
         screenshot_path,
         error_msg: browser_result.error,
         created_at: now,
+        test_count: None,
     };
 
     // 6. 写入数据库
@@ -461,6 +463,7 @@ async fn run_video_task(
                         screenshot_path: result.screenshot_path.clone(),
                         error_msg: result.error_msg.clone(),
                         created_at: result.created_at.clone(),
+                        test_count: None,
                     },
                 });
             }
@@ -491,6 +494,7 @@ async fn run_video_task(
                     page_title: None,
                     error_msg: Some(e.to_string()),
                     created_at: Utc::now().to_rfc3339(),
+                    test_count: None,
                 };
                 save_video_result(&db, &failed_result).await.ok();
             }
@@ -579,6 +583,7 @@ async fn test_single_video(
         page_title: video_result.page_title.clone(),
         error_msg: video_result.error,
         created_at: now,
+        test_count: None,
     };
 
     save_video_result(db, &result).await?;
@@ -668,6 +673,7 @@ async fn run_download_task(
             success: Some(if result.success { 1 } else { 0 }),
             error_msg: result.error.clone(),
             created_at: now,
+        test_count: None,
         };
 
         save_download_result(&db, &dl).await?;
@@ -739,6 +745,7 @@ async fn run_ping_task(
             success: Some(if result.success { 1 } else { 0 }),
             error_msg: result.error,
             created_at: now,
+        test_count: None,
         };
 
         save_ping_result(&db, &pr).await?;

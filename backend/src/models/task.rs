@@ -75,6 +75,17 @@ pub struct CreateTaskResponse {
     pub status: String,
 }
 
+/// 测试配置（从 options 解析，含重复次数）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestConfig {
+    #[serde(default = "default_repeat_count")]
+    pub repeat_count: usize,
+}
+fn default_repeat_count() -> usize { 1 }
+impl Default for TestConfig {
+    fn default() -> Self { Self { repeat_count: 1 } }
+}
+
 /// 网站测试结果模型
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct WebsiteResult {
@@ -99,6 +110,7 @@ pub struct WebsiteResult {
     pub page_title: Option<String>,
     pub screenshot_path: Option<String>,
     pub error_msg: Option<String>,
+    pub test_count: Option<i32>,
     pub created_at: String,
 }
 
@@ -118,6 +130,7 @@ pub struct DownloadResult {
     pub file_size: Option<i32>,
     pub success: Option<i32>,
     pub error_msg: Option<String>,
+    pub test_count: Option<i32>,
     pub created_at: String,
 }
 
@@ -145,6 +158,7 @@ pub struct VideoResult {
     pub screenshot_path: Option<String>,
     pub page_title: Option<String>,
     pub error_msg: Option<String>,
+    pub test_count: Option<i32>,
     pub created_at: String,
 }
 
@@ -169,5 +183,6 @@ pub struct PingResult {
     pub jitter_ms: Option<f64>,
     pub success: Option<i32>,
     pub error_msg: Option<String>,
+    pub test_count: Option<i32>,
     pub created_at: String,
 }

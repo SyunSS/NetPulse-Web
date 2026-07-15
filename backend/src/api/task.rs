@@ -4,9 +4,9 @@ use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Json;
 use axum::Router;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::models::task::{CreateTaskRequest, CreateTaskResponse, DownloadResult, PingResult, TestTask, VideoResult, WebsiteResult};
+use crate::models::task::{CreateTaskRequest, CreateTaskResponse, DownloadResult, PingResult, TestConfig, TestTask, VideoResult, WebsiteResult};
 use crate::services::auth_service::Claims;
 use crate::services::task_service::TaskService;
 use crate::storage::StorageManager;
@@ -25,6 +25,8 @@ pub fn task_routes() -> Router<AppState> {
         .route("/:id/export", get(export_result))
         .route("/:id/cancel", post(cancel_task))
         .route("/:id/retry", post(retry_task))
+        .route("/import", post(import_tasks))
+        .route("/template", get(download_template))
 }
 
 /// 创建测试任务
@@ -246,8 +248,6 @@ async fn export_result(
     }
 }
 
-use serde::Serialize;
-
 fn export_typed<T: Serialize>(
     data: &[T],
     task_id: &str,
@@ -271,6 +271,100 @@ fn export_typed<T: Serialize>(
             Ok(file_response(bytes, "application/json", &format!("{}_{}.json", prefix, task_id)))
         }
     }
+}
+
+// ─── 批量导入 ────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct ImportRequest { tasks: Vec<serde_json::Value> }
+
+#[derive(Debug, Serialize)]
+struct ImportResponse { created: usize, failed: usize, task_ids: Vec<String>, message: String }
+
+async fn import_tasks(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Json(body): Json<ImportRequest>,
+) -> Result<Json<crate::utils::response::ApiResponse<ImportResponse>>, AppError> {
+    let valid = ["ping", "website", "download", "video"];
+    if body.tasks.is_empty() { return Err(AppError::bad_request("任务列表不能为空")); }
+
+    let mut created = 0; let mut failed = 0; let mut ids = Vec::new();
+
+    for item in &body.tasks {
+        let tt = item.get("task_type").and_then(|v| v.as_str()).unwrap_or("website").to_lowercase();
+        if !valid.contains(&tt.as_str()) { failed += 1; continue; }
+
+        let urls: Vec<String> = item.get("urls").and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|u| u.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        if urls.is_empty() { failed += 1; continue; }
+
+        let rc = item.get("options").and_then(|o| o.get("repeat_count"))
+            .and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+
+        let tid = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let cfg = serde_json::json!({ "urls": &urls, "options": { "repeat_count": rc } });
+
+        if sqlx::query("INSERT INTO test_task (id, user_id, task_type, status, config, progress, created_at) VALUES (?,?,?,'pending',?,0,?)")
+            .bind(&tid).bind(&claims.sub).bind(&tt).bind(&cfg.to_string()).bind(&now)
+            .execute(&state.db).await.is_err() { failed += 1; continue; }
+
+        ids.push(tid.clone());
+        created += 1;
+
+        let _ = state.task_tx.send(crate::utils::response::TaskJob {
+            task_id: tid, user_id: claims.sub.clone(), task_type: tt,
+            urls, options: serde_json::json!({ "repeat_count": rc }),
+        }).await;
+    }
+
+    Ok(Json(ok(ImportResponse { created, failed, task_ids: ids,
+        message: format!("导入完成: {} 成功, {} 失败", created, failed) })))
+}
+
+// ─── 模板下载 ────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+struct Tmpl { version: String, description: String, supported_types: Vec<String>, examples: Vec<TmplEx>, batch_import_format: TmplFmt }
+#[derive(Debug, Serialize)]
+struct TmplEx { name: String, task_type: String, urls: Vec<String>, #[serde(skip_serializing_if="Option::is_none")] options: Option<serde_json::Value> }
+#[derive(Debug, Serialize)]
+struct TmplFmt { description: String, json_body: serde_json::Value }
+
+async fn download_template() -> Result<Json<crate::utils::response::ApiResponse<Tmpl>>, AppError> {
+    Ok(Json(ok(Tmpl {
+        version: "1.0".into(),
+        description: "NetPulse 批量测试模板。4 种类型, 可直接导入或参照填写。".into(),
+        supported_types: vec![
+            "ping    — DNS+TCP 连通性探测".into(),
+            "website — 完整网站测速 (DNS→HTTP→浏览器)".into(),
+            "download — 下载速度测试".into(),
+            "video   — 视频播放测速".into(),
+        ],
+        examples: vec![
+            TmplEx { name: "Ping".into(), task_type: "ping".into(),
+                urls: vec!["https://www.baidu.com".into(), "1.1.1.1:443".into()],
+                options: Some(serde_json::json!({"repeat_count":3,"_comment":">1 取平均值"})) },
+            TmplEx { name: "网站".into(), task_type: "website".into(),
+                urls: vec!["https://www.baidu.com".into()],
+                options: Some(serde_json::json!({"repeat_count":2})) },
+            TmplEx { name: "下载".into(), task_type: "download".into(),
+                urls: vec!["http://speedtest.tele2.net/1MB.zip".into()],
+                options: Some(serde_json::json!({"repeat_count":2})) },
+            TmplEx { name: "视频".into(), task_type: "video".into(),
+                urls: vec!["https://www.bilibili.com/video/BV1GJ411x7h7".into()],
+                options: Some(serde_json::json!({"repeat_count":1})) },
+        ],
+        batch_import_format: TmplFmt {
+            description: "POST /api/task/import 格式".into(),
+            json_body: serde_json::json!({"tasks":[
+                {"task_type":"ping","urls":["https://www.baidu.com"],"options":{"repeat_count":1}},
+                {"task_type":"website","urls":["https://github.com"],"options":{"repeat_count":3}}
+            ]}),
+        },
+    })))
 }
 
 fn file_response(bytes: Vec<u8>, content_type: &str, filename: &str) -> Response {

@@ -184,6 +184,18 @@ export const taskApi = {
       `/task/${taskId}/retry`,
     )
   },
+
+  importBatch(data: { tasks: Record<string, unknown>[] }) {
+    return http.post<unknown, { code: number; msg: string; data: { created: number; failed: number; task_ids: string[]; message: string } }>(
+      '/task/import', data,
+    )
+  },
+
+  getTemplate() {
+    return http.get<unknown, { code: number; msg: string; data: any }>(
+      '/task/template',
+    )
+  },
 }
 
 export const dashboardApi = {
