@@ -7,17 +7,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# 先拷贝依赖清单，缓存依赖下载
 COPY backend/Cargo.toml backend/Cargo.lock ./
-RUN mkdir -p src && echo 'fn main() {}' > src/main.rs && \
-    mkdir -p src/api src/config src/database src/models src/services src/engines/browser \
-    src/engines/dns src/engines/http src/engines/download src/engines/video \
-    src/report/excel src/storage src/utils src/worker src/scheduler && \
-    touch src/api/mod.rs src/config/mod.rs src/database/mod.rs src/models/mod.rs && \
-    cargo build --release 2>/dev/null || true
+RUN mkdir -p src && echo 'fn main() {}' > src/main.rs && cargo build --release && rm -rf src/
 
+# 拷贝真实源码并强制重新编译
 COPY backend/src ./src
 COPY backend/config.toml ./
-RUN cargo build --release
+RUN touch src/main.rs && cargo build --release
 
 # ====== 阶段2: 构建前端 ======
 FROM node:22-slim AS frontend-builder
