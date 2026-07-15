@@ -37,6 +37,7 @@ async function handleSubmit() {
       })
       message.success('注册成功，请登录')
       isLogin.value = true
+      password.value = ''
     }
   } catch (e: unknown) {
     const err = e as Error
@@ -51,50 +52,52 @@ async function handleSubmit() {
   <div class="login-page">
     <div class="login-card">
       <div class="login-header">
-        <n-gradient-text type="info" :size="28" class="logo">
-          NetPulse Web
-        </n-gradient-text>
+        <div class="logo-text">NetPulse Web</div>
         <p class="subtitle">网络质量测试平台</p>
       </div>
 
-      <n-form class="login-form">
-        <n-form-item label="用户名">
-          <n-input
-            v-model:value="username"
-            placeholder="请输入用户名"
-            :disabled="loading"
-            size="large"
-          />
-        </n-form-item>
-        <n-form-item label="密码">
-          <n-input
-            v-model:value="password"
-            type="password"
-            placeholder="请输入密码"
-            :disabled="loading"
-            size="large"
-            @keyup.enter="handleSubmit"
-          />
-        </n-form-item>
-        <n-button
-          type="primary"
-          block
-          size="large"
-          :loading="loading"
-          @click="handleSubmit"
-        >
-          {{ isLogin ? '登录' : '注册' }}
-        </n-button>
-      </n-form>
+      <div class="form-group">
+        <label class="form-label">用户名</label>
+        <input
+          v-model="username"
+          type="text"
+          class="form-input"
+          placeholder="请输入用户名"
+          :disabled="loading"
+          autocomplete="username"
+        />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">密码</label>
+        <input
+          v-model="password"
+          type="password"
+          class="form-input"
+          placeholder="请输入密码"
+          :disabled="loading"
+          autocomplete="current-password"
+          @keyup.enter="handleSubmit"
+        />
+      </div>
+
+      <button
+        type="button"
+        class="submit-btn"
+        :disabled="loading"
+        @click="handleSubmit"
+      >
+        {{ loading ? '处理中...' : (isLogin ? '登录' : '注册') }}
+      </button>
 
       <div class="login-footer">
-        <n-button
-          text
-          type="primary"
-          @click="isLogin = !isLogin"
+        <button
+          type="button"
+          class="link-btn"
+          @click="isLogin = !isLogin; password = ''"
         >
           {{ isLogin ? '没有账号？去注册' : '已有账号？去登录' }}
-        </n-button>
+        </button>
       </div>
     </div>
   </div>
@@ -119,18 +122,81 @@ async function handleSubmit() {
   text-align: center;
   margin-bottom: 32px;
 }
-.logo {
+.logo-text {
+  font-size: 28px;
   font-weight: 700;
+  background: linear-gradient(135deg, #2080f0 0%, #18a058 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 .subtitle {
   margin-top: 8px;
   color: var(--n-text-color-3);
   font-size: 14px;
 }
-.login-form {
+.form-group {
   margin-bottom: 16px;
+}
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  color: var(--n-text-color-2);
+}
+.form-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  font-size: 14px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 4px;
+  background: var(--n-color-input);
+  color: var(--n-text-color);
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+.form-input:focus {
+  outline: none;
+  border-color: #2080f0;
+}
+.form-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.submit-btn {
+  width: 100%;
+  height: 40px;
+  margin-top: 8px;
+  border: none;
+  border-radius: 4px;
+  background: #2080f0;
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.submit-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .login-footer {
   text-align: center;
+  margin-top: 16px;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: #2080f0;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 8px;
+}
+.link-btn:hover {
+  text-decoration: underline;
 }
 </style>
