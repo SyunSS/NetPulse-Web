@@ -1,0 +1,775 @@
+<script setup lang="ts">
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useMessage } from 'naive-ui'
+import { usePlanStore } from '@/stores/plan'
+import type { PlanItemInput } from '@/api/plan'
+
+const route = useRoute()
+const router = useRouter()
+const message = useMessage()
+const planStore = usePlanStore()
+
+const isEdit = computed(() => route.name === 'PlanEdit')
+const planId = computed(() => route.params.id as string | undefined)
+
+// 表单状态
+const name = ref('')
+const description = ref('')
+const cronMode = ref('preset')  // preset | custom
+const cronPreset = ref('0 9 * * *')  // 默认每天9点
+const cronCustom = ref('0 0 * * *')
+const enabled = ref(true)
+const items = ref<PlanItemInput[]>([])
+const saving = ref(false)
+
+const taskTypeOptions = [
+  { value: 'website', label: '网站测试', color: 'var(--color-primary)' },
+  { value: 'video', label: '视频测试', color: 'var(--color-warning)' },
+  { value: 'download', label: '下载测试', color: 'var(--color-success)' },
+]
+
+const cronPresets = [
+  { value: '', label: '不定时（仅手动）' },
+  { value: '0 9 * * *', label: '每天 9:00' },
+  { value: '0 */2 * * *', label: '每 2 小时' },
+  { value: '0 */6 * * *', label: '每 6 小时' },
+  { value: '0 0 * * *', label: '每天 0:00' },
+  { value: '0 0 * * 1', label: '每周一 0:00' },
+  { value: '0 0 1 * *', label: '每月 1 号 0:00' },
+  { value: 'custom', label: '自定义...' },
+]
+
+const currentCron = computed(() => {
+  if (cronMode.value === 'preset' && cronPreset.value !== 'custom') {
+    return cronPreset.value || null
+  }
+  return cronCustom.value || null
+})
+
+const nextRunPreview = ref<string | null>(null)
+
+function addItem() {
+  items.value.push({
+    task_type: 'website',
+    urls: [],
+    options: {},
+  })
+}
+
+function removeItem(index: number) {
+  items.value.splice(index, 1)
+}
+
+function addUrlToItem(index: number) {
+  const urls = items.value[index].urls
+  if (urls.length === 0 || urls[urls.length - 1].trim()) {
+    urls.push('')
+  }
+}
+
+function removeUrlFromItem(itemIdx: number, urlIdx: number) {
+  items.value[itemIdx].urls.splice(urlIdx, 1)
+}
+
+// 简单的 cron 下次执行时间预览（前端近似计算）
+function computeNextRunLocal(cronExpr: string): string {
+  // 后端会计算准确的时间，这里只做 UI 提示
+  // 使用 cron 表达式简单解析
+  const parts = cronExpr.split(' ')
+  if (parts.length !== 5) return '请检查 cron 格式'
+  const [minute, hour] = parts
+  if (minute === '0' && hour !== '*' && hour !== '*') {
+    return `每天 ${hour}:00`
+  }
+  if (minute === '0' && hour === '*/2') return '每 2 小时'
+  if (minute === '0' && hour === '*/6') return '每 6 小时'
+  if (minute === '0' && hour === '0' && parts[4] === '1') return '每周一 0:00'
+  if (minute === '0' && hour === '0' && parts[2] === '1') return '每月 1 号 0:00'
+  return cronExpr
+}
+
+watch(currentCron, (val) => {
+  if (val) {
+    nextRunPreview.value = computeNextRunLocal(val)
+  } else {
+    nextRunPreview.value = null
+  }
+})
+
+async function loadPlan() {
+  if (!isEdit.value || !planId.value) return
+  try {
+    const plan = await planStore.fetchPlan(planId.value)
+    name.value = plan.name
+    description.value = plan.description || ''
+    enabled.value = plan.enabled === 1
+
+    if (plan.cron_expression) {
+      const preset = cronPresets.find(p => p.value === plan.cron_expression)
+      if (preset) {
+        cronMode.value = 'preset'
+        cronPreset.value = plan.cron_expression
+      } else {
+        cronMode.value = 'custom'
+        cronCustom.value = plan.cron_expression
+      }
+    } else {
+      cronMode.value = 'preset'
+      cronPreset.value = ''
+    }
+
+    items.value = plan.items.map(it => ({
+      task_type: it.task_type,
+      urls: typeof it.urls === 'string' ? JSON.parse(it.urls) : it.urls,
+      options: it.options ? (typeof it.options === 'string' ? JSON.parse(it.options) : it.options) : {},
+    }))
+  } catch (e: any) {
+    message.error(e.message || '加载失败')
+    router.push('/plans')
+  }
+}
+
+async function handleSave() {
+  if (!name.value.trim()) {
+    message.error('请输入计划名')
+    return
+  }
+  if (items.value.length === 0) {
+    message.error('请至少添加一个测试项')
+    return
+  }
+  for (const it of items.value) {
+    const validUrls = it.urls.filter(u => u.trim())
+    if (validUrls.length === 0) {
+      message.error('每个测试项至少需要一个 URL')
+      return
+    }
+  }
+
+  saving.value = true
+  try {
+    const data = {
+      name: name.value,
+      description: description.value || undefined,
+      cron_expression: currentCron.value || undefined,
+      enabled: enabled.value,
+      items: items.value.map(it => ({
+        task_type: it.task_type,
+        urls: it.urls.filter(u => u.trim()),
+        options: it.options || {},
+      })),
+    }
+
+    if (isEdit.value && planId.value) {
+      await planStore.updatePlan(planId.value, data)
+      message.success('已保存')
+    } else {
+      await planStore.createPlan(data)
+      message.success('已创建')
+    }
+    router.push('/plans')
+  } catch (e: any) {
+    message.error(e.message || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function handleRunNow() {
+  if (!isEdit.value || !planId.value) {
+    message.warning('请先保存计划')
+    return
+  }
+  try {
+    const res = await planStore.runPlan(planId.value)
+    message.success(`已启动 ${res.task_ids.length} 个任务`)
+    router.push(`/plans/${planId.value}/runs`)
+  } catch (e: any) {
+    message.error(e.message || '启动失败')
+  }
+}
+
+onMounted(() => {
+  if (items.value.length === 0 && !isEdit.value) {
+    addItem()
+  }
+  loadPlan()
+})
+</script>
+
+<template>
+  <div class="plan-edit-page">
+    <div class="page-header">
+      <button class="back-btn" @click="router.push('/plans')">← 返回</button>
+      <h1 class="page-title">{{ isEdit ? '编辑计划' : '新建计划' }}</h1>
+      <div class="header-actions">
+        <button v-if="isEdit" class="action-btn primary" @click="handleRunNow">▶ 立即运行</button>
+        <button class="action-btn primary" :disabled="saving" @click="handleSave">
+          {{ saving ? '保存中...' : '保存计划' }}
+        </button>
+      </div>
+    </div>
+
+    <div class="form-container">
+      <!-- 基本信息 -->
+      <section class="form-section">
+        <h2 class="section-title">📝 计划信息</h2>
+        <div class="form-row">
+          <label class="form-label">计划名 <span class="required">*</span></label>
+          <input v-model="name" type="text" class="form-input" placeholder="例如：每日首页检测" />
+        </div>
+        <div class="form-row">
+          <label class="form-label">描述</label>
+          <input v-model="description" type="text" class="form-input" placeholder="简单描述这个计划的用途" />
+        </div>
+        <div class="form-row">
+          <label class="form-label">启用</label>
+          <label class="switch">
+            <input type="checkbox" v-model="enabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </section>
+
+      <!-- 调度 -->
+      <section class="form-section">
+        <h2 class="section-title">⏰ 调度</h2>
+        <div class="cron-tabs">
+          <div
+            class="cron-tab"
+            :class="{ active: cronMode === 'preset' }"
+            @click="cronMode = 'preset'"
+          >预设</div>
+          <div
+            class="cron-tab"
+            :class="{ active: cronMode === 'custom' }"
+            @click="cronMode = 'custom'"
+          >自定义</div>
+        </div>
+        <div v-if="cronMode === 'preset'" class="cron-grid">
+          <div
+            v-for="p in cronPresets"
+            :key="p.value"
+            class="cron-preset"
+            :class="{ active: cronPreset === p.value }"
+            @click="cronPreset = p.value; if (p.value === 'custom') cronMode = 'custom'"
+          >
+            <div class="preset-dot"></div>
+            <div class="preset-label">{{ p.label }}</div>
+          </div>
+        </div>
+        <div v-else class="cron-custom">
+          <div class="form-row">
+            <label class="form-label">Cron 表达式 <span class="required">*</span></label>
+            <input v-model="cronCustom" type="text" class="form-input cron-input" placeholder="0 9 * * *" />
+          </div>
+          <div class="cron-hint">
+            <strong>格式：</strong> 分 时 日 月 周<br/>
+            <code>0 9 * * *</code> = 每天 9:00 &nbsp;&nbsp;
+            <code>*/5 * * * *</code> = 每 5 分钟 &nbsp;&nbsp;
+            <code>0 0 * * 1</code> = 每周一 0:00
+          </div>
+        </div>
+        <div v-if="nextRunPreview" class="next-run-preview">
+          <span class="preview-icon">▶</span>
+          预计执行: <strong>{{ nextRunPreview }}</strong>
+        </div>
+      </section>
+
+      <!-- 测试项 -->
+      <section class="form-section">
+        <div class="section-header">
+          <h2 class="section-title">🎯 测试项 <span class="required">*</span></h2>
+          <button class="add-item-btn" @click="addItem">+ 添加测试项</button>
+        </div>
+
+        <div v-if="items.length === 0" class="empty-items">
+          <p>还没有测试项</p>
+          <button class="add-item-btn" @click="addItem">+ 添加第一个测试项</button>
+        </div>
+
+        <div v-else class="items-list">
+          <div
+            v-for="(item, idx) in items"
+            :key="idx"
+            class="item-card"
+          >
+            <div class="item-header">
+              <select v-model="item.task_type" class="type-select">
+                <option v-for="opt in taskTypeOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+              <button class="remove-btn" @click="removeItem(idx)">🗑</button>
+            </div>
+            <div class="urls-section">
+              <label class="urls-label">URL 列表 <span class="required">*</span></label>
+              <div v-for="(_url, urlIdx) in item.urls" :key="urlIdx" class="url-row">
+                <input
+                  v-model="item.urls[urlIdx]"
+                  type="text"
+                  class="form-input url-input"
+                  placeholder="https://example.com"
+                />
+                <button class="url-remove" @click="removeUrlFromItem(idx, urlIdx)">×</button>
+              </div>
+              <button class="add-url-btn" @click="addUrlToItem(idx)">+ 添加 URL</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.plan-edit-page {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.back-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all var(--transition-fast);
+}
+
+.back-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  flex: 1;
+  margin: 0;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.action-btn {
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.action-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.action-btn.primary {
+  background: var(--gradient-primary);
+  color: white;
+  border: none;
+  font-weight: 600;
+}
+
+.action-btn.primary:hover:not(:disabled) {
+  box-shadow: var(--shadow-glow);
+  transform: translateY(-1px);
+}
+
+.action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.form-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+}
+
+.section-header .section-title {
+  margin-bottom: 0;
+}
+
+.required {
+  color: var(--color-danger);
+}
+
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.form-row:last-child {
+  margin-bottom: 0;
+}
+
+.form-label {
+  width: 100px;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.form-input {
+  flex: 1;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 14px;
+  transition: all var(--transition-fast);
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(32, 128, 240, 0.1);
+}
+
+/* 开关 */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--border-color);
+  border-radius: 24px;
+  transition: var(--transition-fast);
+}
+
+.slider::before {
+  content: '';
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background: white;
+  border-radius: 50%;
+  transition: var(--transition-fast);
+}
+
+.switch input:checked + .slider {
+  background: var(--color-primary);
+}
+
+.switch input:checked + .slider::before {
+  transform: translateX(20px);
+}
+
+/* Cron 标签 */
+.cron-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-body);
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+  width: fit-content;
+}
+
+.cron-tab {
+  padding: 6px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+}
+
+.cron-tab.active {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-weight: 500;
+  box-shadow: var(--shadow-sm);
+}
+
+.cron-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.cron-preset {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg-body);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.cron-preset:hover {
+  border-color: var(--color-primary);
+}
+
+.cron-preset.active {
+  background: rgba(32, 128, 240, 0.08);
+  border-color: var(--color-primary);
+}
+
+.preset-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  opacity: 0.3;
+  flex-shrink: 0;
+}
+
+.cron-preset.active .preset-dot {
+  opacity: 1;
+}
+
+.preset-label {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.cron-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cron-input {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+  height: 44px;
+}
+
+.cron-hint {
+  padding: 12px 16px;
+  background: var(--bg-body);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.8;
+}
+
+.cron-hint code {
+  background: var(--bg-card);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  color: var(--color-primary);
+}
+
+.next-run-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(24, 160, 88, 0.08);
+  border-radius: var(--radius-md);
+  color: var(--color-success);
+  font-size: 13px;
+}
+
+.preview-icon {
+  font-size: 14px;
+}
+
+.next-run-preview strong {
+  font-weight: 600;
+}
+
+/* 测试项 */
+.add-item-btn {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px dashed var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.add-item-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: rgba(32, 128, 240, 0.05);
+}
+
+.empty-items {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-secondary);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.item-card {
+  background: var(--bg-body);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+
+.item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.type-select {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.remove-btn {
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.remove-btn:hover {
+  background: var(--color-danger);
+  color: white;
+  border-color: var(--color-danger);
+}
+
+.urls-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.urls-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.url-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.url-input {
+  flex: 1;
+}
+
+.url-remove {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.url-remove:hover {
+  background: var(--color-danger);
+  color: white;
+  border-color: var(--color-danger);
+}
+
+.add-url-btn {
+  align-self: flex-start;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px dashed var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.add-url-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+</style>

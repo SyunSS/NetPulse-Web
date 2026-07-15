@@ -20,6 +20,7 @@ use tracing::info;
 
 use crate::config::AppConfig;
 use crate::database::init_db;
+use crate::scheduler::PlanScheduler;
 use crate::utils::response::AppState;
 use crate::worker::TaskWorker;
 
@@ -56,6 +57,11 @@ async fn main() -> anyhow::Result<()> {
     );
     worker.start();
     info!("TaskWorker 已启动");
+
+    // 启动调度器
+    let scheduler = PlanScheduler::new(db_pool.clone(), task_tx.clone(), progress_tx.clone());
+    scheduler.start();
+    info!("PlanScheduler 已启动");
 
     // 构建应用状态
     let state = AppState {

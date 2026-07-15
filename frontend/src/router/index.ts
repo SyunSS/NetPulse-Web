@@ -21,6 +21,26 @@ const router = createRouter({
           component: () => import('@/views/Dashboard.vue'),
         },
         {
+          path: 'plans',
+          name: 'Plans',
+          component: () => import('@/views/Plans.vue'),
+        },
+        {
+          path: 'plans/new',
+          name: 'PlanNew',
+          component: () => import('@/views/PlanEdit.vue'),
+        },
+        {
+          path: 'plans/:id/edit',
+          name: 'PlanEdit',
+          component: () => import('@/views/PlanEdit.vue'),
+        },
+        {
+          path: 'plans/:id/runs',
+          name: 'PlanRuns',
+          component: () => import('@/views/PlanRuns.vue'),
+        },
+        {
           path: 'history',
           name: 'History',
           component: () => import('@/views/History.vue'),

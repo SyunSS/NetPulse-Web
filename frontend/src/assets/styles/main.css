@@ -1,5 +1,73 @@
 /* NetPulse Web - Global Styles */
 
+:root {
+  /* 品牌色 */
+  --color-primary: #2080f0;
+  --color-success: #18a058;
+  --color-warning: #f0a020;
+  --color-danger: #d03050;
+  --color-info: #0090ba;
+
+  /* 渐变 */
+  --gradient-primary: linear-gradient(135deg, #2080f0 0%, #18a058 100%);
+  --gradient-card: linear-gradient(135deg, rgba(32, 128, 240, 0.1) 0%, rgba(24, 160, 88, 0.05) 100%);
+  --gradient-header: linear-gradient(135deg, #2080f0 0%, #18a058 100%);
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-glow: 0 0 20px rgba(32, 128, 240, 0.3);
+
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  /* 间距 */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  /* 过渡 */
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* 字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+
+  /* 亮色主题 */
+  --bg-body: #f5f7fa;
+  --bg-card: #ffffff;
+  --bg-hover: #f5f7fa;
+  --bg-sidebar: #ffffff;
+  --bg-input: #ffffff;
+  --text-primary: #1f2937;
+  --text-secondary: #6b7280;
+  --text-tertiary: #9ca3af;
+  --border-color: #e5e7eb;
+  --border-color-hover: #d1d5db;
+}
+
+html.dark {
+  /* 暗色主题 */
+  --bg-body: #18181c;
+  --bg-card: #23232a;
+  --bg-hover: #2a2a32;
+  --bg-sidebar: #1f1f26;
+  --bg-input: #2a2a32;
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+  --text-tertiary: #6b7280;
+  --border-color: #3a3a44;
+  --border-color-hover: #4a4a54;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -7,35 +75,75 @@
 }
 
 html, body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-sans);
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 body {
-  background: var(--n-color-body);
-  color: var(--n-text-color);
-  transition: background-color 0.3s, color 0.3s;
+  background: var(--bg-body);
+  color: var(--text-primary);
+  transition: background-color var(--transition-base), color var(--transition-base);
 }
 
 #app {
   min-height: 100vh;
 }
 
-/* 暗色模式样式 */
-html.dark {
-  color-scheme: dark;
-}
-
 /* 滚动条 */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--n-scrollbar-color);
-  border-radius: 3px;
+  background: var(--border-color);
+  border-radius: 4px;
 }
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-color-hover);
+}
+
+/* 通用工具类 */
+.text-primary { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-tertiary { color: var(--text-tertiary); }
+.text-success { color: var(--color-success); }
+.text-danger { color: var(--color-danger); }
+.text-warning { color: var(--color-warning); }
+
+.brand-gradient {
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 700;
+}
+
+/* 卡片 hover 效果 */
+.lift {
+  transition: transform var(--transition-base), box-shadow var(--transition-base);
+}
+.lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* 状态标签 */
+.status-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.status-completed { background: rgba(24, 160, 88, 0.15); color: var(--color-success); }
+.status-running { background: rgba(32, 128, 240, 0.15); color: var(--color-primary); }
+.status-pending { background: rgba(156, 163, 175, 0.15); color: var(--text-secondary); }
+.status-failed { background: rgba(208, 48, 80, 0.15); color: var(--color-danger); }
+.status-cancelled { background: rgba(240, 160, 32, 0.15); color: var(--color-warning); }

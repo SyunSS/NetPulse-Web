@@ -152,12 +152,56 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             updated_at TEXT NOT NULL
         );
         "#,
+        // task_plans 表
+        r#"
+        CREATE TABLE IF NOT EXISTS task_plans (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            cron_expression TEXT,
+            enabled INTEGER DEFAULT 1,
+            last_run_at TEXT,
+            next_run_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        "#,
+        // task_plan_items 表
+        r#"
+        CREATE TABLE IF NOT EXISTS task_plan_items (
+            id TEXT PRIMARY KEY,
+            plan_id TEXT NOT NULL,
+            task_type TEXT NOT NULL,
+            urls TEXT NOT NULL,
+            options TEXT,
+            order_index INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE
+        );
+        "#,
+        // task_plan_runs 表
+        r#"
+        CREATE TABLE IF NOT EXISTS task_plan_runs (
+            id TEXT PRIMARY KEY,
+            plan_id TEXT NOT NULL,
+            task_id TEXT,
+            triggered_by TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE,
+            FOREIGN KEY (task_id) REFERENCES test_task(id) ON DELETE SET NULL
+        );
+        "#,
     ];
 
     for sql in migrations {
         sqlx::query(sql).execute(pool).await?;
     }
 
-    info!("数据库迁移完成（{} 张表）", 7);
+    info!("数据库迁移完成（{} 张表）", 10);
     Ok(())
 }

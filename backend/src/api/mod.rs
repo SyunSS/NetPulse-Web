@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod task;
 pub mod ws;
+pub mod plan;
 
 use axum::{
     extract::{Extension, State},
@@ -20,6 +21,7 @@ pub fn build_router(state: AppState) -> Router {
     // 需要认证的路由
     let protected_routes = Router::new()
         .nest("/api/task", task::task_routes())
+        .nest("/api/plan", plan::plan_routes())
         .route("/api/dashboard/stats", get(dashboard_stats))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 

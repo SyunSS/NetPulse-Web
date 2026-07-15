@@ -1,71 +1,91 @@
 <script setup lang="ts">
-import type { UserInfo } from '@/api/auth'
+import { computed } from 'vue'
+import { useDark } from '@/utils/theme'
 
-defineProps<{
-  isDark: boolean
-  user: UserInfo | null
+const { isDark, toggleDark } = useDark()
+
+const props = defineProps<{
+  title: string
+  subtitle?: string
 }>()
 
 const emit = defineEmits<{
-  'toggle-dark': []
-  logout: []
+  refresh: []
 }>()
 </script>
 
 <template>
-  <div class="app-header">
+  <header class="app-header">
     <div class="header-left">
-      <n-gradient-text type="info" :size="22" class="logo">
-        NetPulse Web
-      </n-gradient-text>
+      <h1 class="header-title">{{ title }}</h1>
+      <p v-if="subtitle" class="header-subtitle">{{ subtitle }}</p>
     </div>
     <div class="header-right">
-      <n-button
-        quaternary
-        circle
-        @click="emit('toggle-dark')"
-      >
-        <template #icon>
-          <n-icon>
-            {{ isDark ? '☀️' : '🌙' }}
-          </n-icon>
-        </template>
-      </n-button>
-      <n-dropdown
-        trigger="click"
-        :options="[
-          { label: '退出登录', key: 'logout' },
-        ]"
-        @select="emit('logout')"
-      >
-        <n-button quaternary>
-          {{ user?.username || '用户' }}
-        </n-button>
-      </n-dropdown>
+      <button class="icon-btn" @click="emit('refresh')" title="刷新">
+        ↻
+      </button>
+      <button class="icon-btn" @click="toggleDark" title="切换主题">
+        {{ isDark ? '☀️' : '🌙' }}
+      </button>
     </div>
-  </div>
+  </header>
 </template>
 
 <style scoped>
 .app-header {
+  height: 72px;
+  padding: 0 32px;
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: center;
-  padding: 0 24px;
-  height: 60px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
+
 .header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  flex: 1;
+  min-width: 0;
 }
+
+.header-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+  margin: 0;
+}
+
+.header-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
 .header-right {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.logo {
-  font-weight: 700;
+
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
   cursor: pointer;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-color-hover);
 }
 </style>
