@@ -138,20 +138,21 @@ const stClass = (s: string) => `st st-${s}`
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
-            <th>URL</th><th>DNS(ms)</th><th>TCP(ms)</th><th>TLS(ms)</th><th>HTTP</th><th>TTFB(ms)</th><th>打开(ms)</th><th>资源数</th><th>标题</th><th>状态</th>
+            <th>URL</th><th>DNS解析时延(ms)</th><th>DNS解析成功率(%)</th><th>TCP连接时延(ms)</th><th>TLS握手时延(ms)</th><th>HTTP状态码</th><th>首包时延(ms)</th><th>首屏时延(ms)</th><th>首页时延(ms)</th><th>访问成功率(%)</th><th>页面标题</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in websiteResults" :key="r.id">
               <td class="url-cell">{{ r.url }}</td>
               <td>{{ r.dns_time_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.dns_success !== null ? (r.dns_success === 1 ? '100' : '0') : '-' }}</td>
               <td>{{ r.tcp_time_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.tls_time_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.http_status ?? '-' }}</td>
               <td>{{ r.ttfb_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.fp_ms?.toFixed(1) ?? r.fcp_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.page_open_time_ms?.toFixed(0) ?? '-' }}</td>
-              <td>{{ r.resource_count ?? '-' }}</td>
+              <td>{{ r.error_msg ? '0' : '100' }}</td>
               <td class="title-cell">{{ r.page_title || '-' }}</td>
-              <td><span :class="r.error_msg ? 'badge err' : 'badge ok'">{{ r.error_msg ? '失败' : '成功' }}</span></td>
             </tr>
           </tbody>
         </table>
@@ -164,18 +165,21 @@ const stClass = (s: string) => `st st-${s}`
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
-            <th>URL</th><th>平台</th><th>首播(ms)</th><th>缓冲</th><th>时长(ms)</th><th>下载速度</th><th>大小</th><th>丢帧</th><th>标题</th><th>状态</th>
+            <th>URL</th><th>平台</th><th>DNS解析时延(ms)</th><th>DNS解析成功率(%)</th><th>TCP连接时延(ms)</th><th>HTTP响应时延(ms)</th><th>视频首次播放时延(ms)</th><th>视频卡顿率(%)</th><th>视频下载速率(Mbps)</th><th>视频播放成功率(%)</th><th>页面标题</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in videoResults" :key="r.id">
               <td class="url-cell">{{ r.url }}</td>
               <td>{{ r.platform || '-' }}</td>
+              <td>{{ r.dns_time_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.dns_success !== null ? (r.dns_success === 1 ? '100' : '0') : '-' }}</td>
+              <td>{{ r.tcp_time_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.http_response_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.first_play_time_ms?.toFixed(0) ?? '-' }}</td>
-              <td>{{ r.buffer_count ?? '-' }}</td>
-              <td>{{ r.video_duration_ms?.toFixed(0) ?? '-' }}</td>
-              <td>{{ r.video_download_speed?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.video_size ? formatFileSize(r.video_size) : '-' }}</td>
-              <td>{{ r.dropped_frames ?? '-' }}</td>
+              <td>{{ r.buffer_rate?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.video_download_speed ? (r.video_download_speed / 1024).toFixed(2) : '-' }}</td>
+              <td>{{ r.play_success !== null ? (r.play_success === 1 ? '100' : '0') : '-' }}</td>
+              <td class="title-cell">{{ r.page_title || '-' }}</td>
               <td class="title-cell">{{ r.page_title || '-' }}</td>
               <td><span :class="r.play_success===1 ? 'badge ok' : 'badge err'">{{ r.play_success===1 ? '成功' : '待确认' }}</span></td>
             </tr>
@@ -190,14 +194,20 @@ const stClass = (s: string) => `st st-${s}`
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
-            <th>URL</th><th>速度(KB/s)</th><th>平均(KB/s)</th><th>峰值(KB/s)</th><th>耗时(ms)</th><th>大小</th><th>状态</th>
+            <th>URL</th><th>文件DNS时延(ms)</th><th>DNS解析成功率(%)</th><th>文件TCP连接时延(ms)</th><th>文件下载速率(Mbps)</th><th>平均速率(Mbps)</th><th>峰值速率(Mbps)</th><th>下载耗时(ms)</th><th>文件大小</th><th>文件下载成功率(%)</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in downloadResults" :key="r.id">
               <td class="url-cell">{{ r.url }}</td>
-              <td>{{ r.download_speed?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.avg_speed?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.peak_speed?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.dns_time_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.dns_success !== null ? (r.dns_success === 1 ? '100' : '0') : '-' }}</td>
+              <td>{{ r.tcp_time_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.download_speed ? (r.download_speed / 1024).toFixed(2) : '-' }}</td>
+              <td>{{ r.avg_speed ? (r.avg_speed / 1024).toFixed(2) : '-' }}</td>
+              <td>{{ r.peak_speed ? (r.peak_speed / 1024).toFixed(2) : '-' }}</td>
+              <td>{{ r.download_time_ms?.toFixed(0) ?? '-' }}</td>
+              <td>{{ r.file_size ? formatFileSize(r.file_size) : '-' }}</td>
+              <td>{{ r.success !== null ? (r.success === 1 ? '100' : '0') : '-' }}</td>
               <td>{{ r.download_time_ms?.toFixed(0) ?? '-' }}</td>
               <td>{{ r.file_size ? formatFileSize(r.file_size) : '-' }}</td>
               <td><span :class="r.success===1 ? 'badge ok' : 'badge err'">{{ r.success===1 ? '成功' : '失败' }}</span></td>
@@ -213,7 +223,7 @@ const stClass = (s: string) => `st st-${s}`
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
-            <th>目标</th><th>平均时延(ms)</th><th>丢包率(%)</th><th>抖动(ms)</th><th>状态</th>
+            <th>目标</th><th>时延(ms)</th><th>丢包率(%)</th><th>抖动时延(ms)</th><th>状态</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in pingResults" :key="r.id">

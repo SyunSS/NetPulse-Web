@@ -46,9 +46,9 @@ pub fn export_website_xlsx(
 
     // === 表头 ===
     let headers = [
-        "序号", "URL", "DNS(ms)", "DNS成功", "TCP(ms)", "TLS(ms)", "HTTP状态码",
-        "TTFB(ms)", "FP(ms)", "FCP(ms)", "DOM加载(ms)", "Load事件(ms)",
-        "页面打开(ms)", "首页绘制(ms)", "资源数量", "资源大小(B)", "最终URL",
+        "序号", "URL", "DNS解析时延(ms)", "DNS解析成功率(%)", "TCP连接时延(ms)", "TLS握手时延(ms)", "HTTP状态码",
+        "首包时延(ms)", "首屏时延(ms)", "FCP(ms)", "DOM加载(ms)", "Load事件(ms)",
+        "首页时延(ms)", "首次绘制(ms)", "访问成功率(%)", "最终URL",
         "页面标题", "截图路径", "错误信息",
     ];
 
@@ -125,8 +125,9 @@ pub fn export_video_xlsx(
     let err_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0xFF0000));
 
     let headers = [
-        "序号", "URL", "平台", "首次播放(ms)", "缓冲次数", "缓冲时间(ms)",
-        "播放成功", "下载速度(KB/s)", "视频大小(B)", "视频时长(ms)",
+        "序号", "URL", "平台", "DNS解析时延(ms)", "DNS解析成功率(%)", "TCP连接时延(ms)", "HTTP响应时延(ms)",
+        "视频首次播放时延(ms)", "缓冲次数", "缓冲时间(ms)", "视频卡顿率(%)",
+        "视频播放成功率(%)", "视频下载速率(Mbps)", "视频大小(B)", "视频时长(ms)",
         "丢帧", "解码帧", "页面标题", "截图", "错误",
     ];
 
@@ -180,8 +181,9 @@ pub fn export_download_xlsx(
     let err_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0xFF0000));
 
     let headers = [
-        "序号", "URL", "下载速度(KB/s)", "平均速度(KB/s)", "峰值速度(KB/s)",
-        "下载时间(ms)", "文件大小(B)", "状态", "错误",
+        "序号", "URL", "文件DNS时延(ms)", "DNS解析成功率(%)", "文件TCP连接时延(ms)",
+        "文件下载速率(Mbps)", "平均速率(Mbps)", "峰值速率(Mbps)",
+        "下载耗时(ms)", "文件大小(B)", "文件下载成功率(%)", "错误",
     ];
 
     for (col, h) in headers.iter().enumerate() {
@@ -306,7 +308,7 @@ pub fn export_plan_run_xlsx(
     // 网站测试结果
     if !website_data.is_empty() {
         let sheet = workbook.add_worksheet().set_name("网站测试")?;
-        let headers = ["URL", "DNS(ms)", "TCP(ms)", "TLS(ms)", "HTTP", "TTFB(ms)", "页面打开(ms)", "资源数", "大小(B)", "错误"];
+        let headers = ["URL", "DNS解析时延(ms)", "TCP连接时延(ms)", "TLS握手时延(ms)", "HTTP状态码", "首包时延(ms)", "首页时延(ms)", "资源数", "大小(B)", "错误"];
         for (col, h) in headers.iter().enumerate() {
             sheet.write_with_format(0, col as u16, *h, &header_fmt)?;
         }
@@ -332,7 +334,7 @@ pub fn export_plan_run_xlsx(
     // 视频测试结果
     if !video_data.is_empty() {
         let sheet = workbook.add_worksheet().set_name("视频测试")?;
-        let headers = ["URL", "平台", "首播(ms)", "缓冲", "缓冲时间(ms)", "下载速度(KB/s)", "大小(B)", "时长(ms)", "丢帧", "解码帧", "标题", "错误"];
+        let headers = ["URL", "平台", "DNS解析时延(ms)", "DNS成功率(%)", "TCP连接时延(ms)", "HTTP响应时延(ms)", "首次播放时延(ms)", "卡顿率(%)", "下载速率(Mbps)", "大小(B)", "时长(ms)", "丢帧", "解码帧", "标题", "错误"];
         for (col, h) in headers.iter().enumerate() {
             sheet.write_with_format(0, col as u16, *h, &header_fmt)?;
         }
@@ -360,7 +362,7 @@ pub fn export_plan_run_xlsx(
     // 下载测试结果
     if !download_data.is_empty() {
         let sheet = workbook.add_worksheet().set_name("下载测试")?;
-        let headers = ["URL", "速度(KB/s)", "平均(KB/s)", "峰值(KB/s)", "耗时(ms)", "大小(B)", "状态", "错误"];
+        let headers = ["URL", "文件DNS时延(ms)", "DNS成功率(%)", "文件TCP连接时延(ms)", "下载速率(Mbps)", "平均速率(Mbps)", "峰值速率(Mbps)", "下载耗时(ms)", "大小(B)", "下载成功率(%)", "错误"];
         for (col, h) in headers.iter().enumerate() {
             sheet.write_with_format(0, col as u16, *h, &header_fmt)?;
         }
