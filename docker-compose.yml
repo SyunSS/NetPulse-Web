@@ -22,6 +22,7 @@ services:
       - netpulse-net
     restart: unless-stopped
     environment:
+      - TZ=Asia/Shanghai
       - RUST_LOG=info,netpulse_web=debug
       - CHROME_PATH=/usr/bin/chromium
       # 容器内强制使用绝对路径
