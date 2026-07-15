@@ -13,8 +13,11 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - netpulse-data:/app/data
-      - netpulse-logs:/app/logs
+      # 数据目录（SQLite 数据库、截图、Excel 导出都在这里）
+      # Windows 下可改成绝对路径，如 D:/netpulse/data:/app/data
+      - ./data:/app/data
+      # 日志目录
+      - ./logs:/app/logs
     networks:
       - netpulse-net
     restart: unless-stopped
@@ -27,12 +30,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-
-volumes:
-  netpulse-data:
-    driver: local
-  netpulse-logs:
-    driver: local
 
 networks:
   netpulse-net:
