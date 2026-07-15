@@ -292,7 +292,8 @@ async fn import_tasks(
     let mut created = 0; let mut failed = 0; let mut ids = Vec::new();
 
     for item in &body.tasks {
-        let tt = item.get("task_type").and_then(|v| v.as_str()).unwrap_or("website").to_lowercase();
+        let tt = item.get("task_type").and_then(|v| v.as_str()).unwrap_or("website")
+            .trim().trim_matches(|c: char| c == '[' || c == ']' || c.is_whitespace()).to_lowercase();
         if !valid.contains(&tt.as_str()) { failed += 1; continue; }
 
         let urls: Vec<String> = item.get("urls").and_then(|v| v.as_array())

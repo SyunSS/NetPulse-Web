@@ -15,7 +15,7 @@ use crate::engines::download::DownloadEngine;
 use crate::engines::http::HttpEngine;
 use crate::engines::ping::PingEngine;
 use crate::engines::video::VideoEngine;
-use crate::models::task::{DownloadResult, PingResult, VideoResult, WebsiteResult};
+use crate::models::task::{DownloadResult, PingResult, TestConfig, VideoResult, WebsiteResult};
 use crate::storage::StorageManager;
 use crate::utils::response::{ProgressMessage, TaskJob};
 
@@ -106,181 +106,155 @@ async fn run_website_task(
     let task_id = &job.task_id;
     let total = job.urls.len();
     let timeout = Duration::from_secs(config.task.timeout_seconds);
+    let repeat_count = parse_repeat_count(&job.options);
 
-    // 更新任务状态为 running
     update_task_status(&db, task_id, "running", None).await?;
 
-    // 推送任务开始
-    let _ = progress_tx.send(ProgressMessage::TaskStarted {
-        task_id: task_id.clone(),
-        total_urls: total,
-    });
-
-    log_progress(&progress_tx, task_id, "info", &format!("开始测试 {} 个URL", total));
+    let _ = progress_tx.send(ProgressMessage::TaskStarted { task_id: task_id.clone(), total_urls: total });
+    log_progress(&progress_tx, task_id, "info", &format!("开始测试 {} 个URL (重复 {} 次)", total, repeat_count));
 
     let mut success_count = 0usize;
     let mut fail_count = 0usize;
 
     for (i, url) in job.urls.iter().enumerate() {
-        // 推送当前 URL 测试中
-        let _ = progress_tx.send(ProgressMessage::UrlTesting {
-            task_id: task_id.clone(),
-            url: url.clone(),
-            current: i + 1,
-            total,
-        });
-
+        let _ = progress_tx.send(ProgressMessage::UrlTesting { task_id: task_id.clone(), url: url.clone(), current: i + 1, total });
         log_progress(&progress_tx, task_id, "info", &format!("正在测试: {}", url));
 
-        // 执行单个 URL 测试
-        match test_single_url(&db, &config, task_id, url, timeout).await {
+        match test_website_url(&db, &config, task_id, url, timeout, repeat_count).await {
             Ok(result) => {
                 success_count += 1;
-                let _ = progress_tx.send(ProgressMessage::UrlCompleted {
-                    task_id: task_id.clone(),
-                    url: url.clone(),
-                    result,
-                });
+                let _ = progress_tx.send(ProgressMessage::UrlCompleted { task_id: task_id.clone(), url: url.clone(), result: result.clone() });
             }
             Err(e) => {
                 fail_count += 1;
                 log_progress(&progress_tx, task_id, "error", &format!("测试失败 {}: {}", url, e));
-
-                // 即使失败也写一条记录
                 let failed_result = WebsiteResult {
-                    id: Uuid::new_v4().to_string(),
-                    task_id: task_id.clone(),
-                    url: url.clone(),
-                    dns_time_ms: None,
-                    dns_success: None,
-                    tcp_time_ms: None,
-                    tls_time_ms: None,
-                    http_status: None,
-                    ttfb_ms: None,
-                    fp_ms: None,
-                    fcp_ms: None,
-                    dom_content_loaded_ms: None,
-                    load_event_ms: None,
-                    page_open_time_ms: None,
-                    first_paint_ms: None,
-                    resource_count: None,
-                    resource_total_size: None,
-                    final_url: None,
-                    page_title: None,
-                    screenshot_path: None,
+                    id: Uuid::new_v4().to_string(), task_id: task_id.clone(), url: url.clone(),
+                    dns_time_ms: None, dns_success: None, tcp_time_ms: None, tls_time_ms: None,
+                    http_status: None, ttfb_ms: None, fp_ms: None, fcp_ms: None,
+                    dom_content_loaded_ms: None, load_event_ms: None, page_open_time_ms: None,
+                    first_paint_ms: None, resource_count: None, resource_total_size: None,
+                    final_url: None, page_title: None, screenshot_path: None,
                     error_msg: Some(e.to_string()),
-                    created_at: Utc::now().to_rfc3339(),
-                    test_count: None,
+                    created_at: Utc::now().to_rfc3339(), test_count: Some(repeat_count as i32),
                 };
                 save_website_result(&db, &failed_result).await.ok();
             }
         }
-
-        // 更新进度
-        let progress = ((i + 1) as f64 / total as f64) * 100.0;
-        let _ = progress_tx.send(ProgressMessage::ProgressUpdate {
-            task_id: task_id.clone(),
-            progress,
-        });
-
-        // 更新数据库中的进度
-        update_task_progress(&db, task_id, progress).await.ok();
+        let progress = ((i + 1) as f64 / total as f64 * 100.0);
+        let _ = progress_tx.send(ProgressMessage::ProgressUpdate { task_id: task_id.clone(), progress });
     }
 
-    // 任务完成
-    let _ = progress_tx.send(ProgressMessage::TaskCompleted {
-        task_id: task_id.clone(),
-        success_count,
-        fail_count,
-    });
-
-    log_progress(
-        &progress_tx,
-        task_id,
-        "info",
-        &format!("任务完成: 成功 {}, 失败 {}", success_count, fail_count),
-    );
-
-    // 更新任务状态
+    let _ = progress_tx.send(ProgressMessage::TaskCompleted { task_id: task_id.clone(), success_count, fail_count });
     update_task_status(&db, task_id, "completed", None).await?;
-
     Ok(())
 }
 
 /// 测试单个 URL
-async fn test_single_url(
+/// 从 job options 中提取 repeat_count，默认 1
+fn parse_repeat_count(options: &serde_json::Value) -> usize {
+    options.get("repeat_count")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .unwrap_or(1)
+        .max(1)
+}
+
+/// 对单个 URL 执行 N 次网站测试并取平均
+async fn test_website_url(
     db: &SqlitePool,
     config: &AppConfig,
     task_id: &str,
     url: &str,
     timeout: Duration,
+    repeat_count: usize,
 ) -> anyhow::Result<WebsiteResult> {
-    let now = Utc::now().to_rfc3339();
-    let result_id = Uuid::new_v4().to_string();
+    let mut dns_times = Vec::with_capacity(repeat_count);
+    let mut dns_ok = 0usize;
+    let mut tcp_times = Vec::with_capacity(repeat_count);
+    let mut tls_times = Vec::with_capacity(repeat_count);
+    let mut http_statuses = Vec::with_capacity(repeat_count);
+    let mut ttfb_times = Vec::with_capacity(repeat_count);
+    let mut fp_times = Vec::with_capacity(repeat_count);
+    let mut fcp_times = Vec::with_capacity(repeat_count);
+    let mut dcl_times = Vec::with_capacity(repeat_count);
+    let mut load_times = Vec::with_capacity(repeat_count);
+    let mut page_open_times = Vec::with_capacity(repeat_count);
+    let mut resource_counts = Vec::with_capacity(repeat_count);
+    let mut resource_sizes = Vec::with_capacity(repeat_count);
+    let mut final_url: Option<String> = None;
+    let mut page_title: Option<String> = None;
+    let mut screenshot_path: Option<String> = None;
+    let mut last_error: Option<String> = None;
 
-    // 1. DNS 解析
-    let dns_result = DnsEngine::resolve(url).await?;
+    for _ in 0..repeat_count {
+        let dns = DnsEngine::resolve(url).await?;
+        dns_times.push(dns.dns_time_ms);
+        if dns.dns_success { dns_ok += 1; }
 
-    // 2. HTTP 探测
-    let http_result = HttpEngine::probe(url, timeout).await;
+        let http = HttpEngine::probe(url, timeout).await;
+        tcp_times.push(http.tcp_time_ms);
+        tls_times.push(http.tls_time_ms);
+        ttfb_times.push(http.ttfb_ms);
+        if let Some(s) = http.http_status { http_statuses.push(s); }
+        if final_url.is_none() { final_url = Some(http.final_url.clone()); }
 
-    // 3. 浏览器测试
-    let browser_engine = BrowserEngine::new(
-        &config.chrome.path,
-        config.chrome.headless,
-        timeout,
-    );
-    let browser_result = browser_engine.test_page(url).await;
+        let browser = BrowserEngine::new(&config.chrome.path, config.chrome.headless, timeout).test_page(url).await;
+        if let Some(v) = browser.fp_ms { fp_times.push(v); }
+        if let Some(v) = browser.fcp_ms { fcp_times.push(v); }
+        if let Some(v) = browser.dom_content_loaded_ms { dcl_times.push(v); }
+        if let Some(v) = browser.load_event_ms { load_times.push(v); }
+        if let Some(v) = browser.page_open_time_ms { page_open_times.push(v); }
+        if let Some(v) = browser.resource_count { resource_counts.push(v); }
+        if let Some(v) = browser.resource_total_size { resource_sizes.push(v); }
+        if page_title.is_none() { page_title = browser.page_title.clone(); }
 
-    // 4. 保存截图
-    let screenshot_path = if let Some(data) = &browser_result.screenshot {
-        match StorageManager::save_screenshot(
-            &config.storage.screenshot_dir,
-            task_id,
-            url,
-            data,
-        ) {
-            Ok(path) => Some(path),
-            Err(e) => {
-                warn!("截图保存失败: {}", e);
-                None
+        if screenshot_path.is_none() {
+            if let Some(ref data) = browser.screenshot {
+                screenshot_path = StorageManager::save_screenshot(&config.storage.screenshot_dir, task_id, url, data).ok();
             }
         }
-    } else {
-        None
-    };
 
-    // 5. 组装结果
+        if let Some(ref e) = browser.error { last_error = Some(e.clone()); }
+    }
+
     let result = WebsiteResult {
-        id: result_id,
+        id: Uuid::new_v4().to_string(),
         task_id: task_id.to_string(),
         url: url.to_string(),
-        dns_time_ms: Some(dns_result.dns_time_ms),
-        dns_success: Some(if dns_result.dns_success { 1 } else { 0 }),
-        tcp_time_ms: Some(http_result.tcp_time_ms),
-        tls_time_ms: Some(http_result.tls_time_ms),
-        http_status: http_result.http_status,
-        ttfb_ms: Some(http_result.ttfb_ms),
-        fp_ms: browser_result.fp_ms,
-        fcp_ms: browser_result.fcp_ms,
-        dom_content_loaded_ms: browser_result.dom_content_loaded_ms,
-        load_event_ms: browser_result.load_event_ms,
-        page_open_time_ms: browser_result.page_open_time_ms,
-        first_paint_ms: browser_result.first_paint_ms,
-        resource_count: browser_result.resource_count,
-        resource_total_size: browser_result.resource_total_size,
-        final_url: browser_result.final_url.or(Some(http_result.final_url)),
-        page_title: browser_result.page_title,
+        dns_time_ms: avg(&dns_times),
+        dns_success: Some(if repeat_count > 0 && dns_ok > 0 { 1 } else { 0 }),
+        tcp_time_ms: avg(&tcp_times),
+        tls_time_ms: avg(&tls_times),
+        http_status: http_statuses.last().copied(),
+        ttfb_ms: avg(&ttfb_times),
+        fp_ms: avg(&fp_times),
+        fcp_ms: avg(&fcp_times),
+        dom_content_loaded_ms: avg(&dcl_times),
+        load_event_ms: avg(&load_times),
+        page_open_time_ms: avg(&page_open_times),
+        first_paint_ms: avg(&fp_times),
+        resource_count: avg_i32(&resource_counts),
+        resource_total_size: avg_i32(&resource_sizes),
+        final_url,
+        page_title,
         screenshot_path,
-        error_msg: browser_result.error,
-        created_at: now,
-        test_count: None,
+        error_msg: last_error,
+        created_at: Utc::now().to_rfc3339(),
+        test_count: Some(repeat_count as i32),
     };
 
-    // 6. 写入数据库
     save_website_result(db, &result).await?;
-
     Ok(result)
+}
+
+/// 向量取平均
+fn avg(v: &[f64]) -> Option<f64> {
+    if v.is_empty() { None } else { Some(v.iter().sum::<f64>() / v.len() as f64) }
+}
+
+fn avg_i32(v: &[i32]) -> Option<i32> {
+    if v.is_empty() { None } else { Some((v.iter().map(|&x| x as f64).sum::<f64>() / v.len() as f64).round() as i32) }
 }
 
 /// 保存网站测试结果到数据库

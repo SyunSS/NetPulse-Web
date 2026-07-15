@@ -9,6 +9,7 @@ const collapsed = ref(false)
 const pageTitle = computed(() => {
   const titles: Record<string, string> = {
     'Dashboard': '概览',
+    'CreateTask': '创建任务',
     'Plans': '测试计划',
     'PlanEdit': '计划编辑',
     'PlanRuns': '运行历史',

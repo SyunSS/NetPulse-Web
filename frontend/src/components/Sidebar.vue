@@ -17,6 +17,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { key: 'dashboard', label: '概览', icon: '📊', to: '/' },
+  { key: 'create', label: '创建任务', icon: '➕', to: '/create' },
   { key: 'plans', label: '测试计划', icon: '📋', to: '/plans' },
   { key: 'history', label: '历史记录', icon: '🕘', to: '/history' },
   { key: 'settings', label: '系统设置', icon: '⚙️', to: '/settings' },
