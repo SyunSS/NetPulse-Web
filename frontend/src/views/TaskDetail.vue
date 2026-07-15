@@ -4,11 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { taskApi, type TestTask, type WebsiteResult, type VideoResult, type DownloadResult } from '@/api/task'
 import { getWsClient, type ProgressMessage } from '@/api/ws'
+import { useAuthStore } from '@/stores/auth'
 import { formatMs, formatFileSize, formatTime } from '@/utils'
 
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
+const authStore = useAuthStore()
 const taskId = route.params.id as string
 
 const task = ref<TestTask | null>(null)
@@ -87,9 +89,24 @@ async function handleRetry() {
   }
 }
 
-function handleExport(format: string) {
-  const url = `/api/task/${taskId}/export?format=${format}`
-  window.open(url, '_blank')
+async function handleExport(format: string) {
+  try {
+    const resp = await fetch(`/api/task/${taskId}/export?format=${format}`, {
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
+    if (!resp.ok) throw new Error('导出失败')
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const ext = format === 'xlsx' ? 'xlsx' : format === 'csv' ? 'csv' : 'json'
+    a.download = `result_${taskId.substring(0, 8)}.${ext}`
+    a.click()
+    URL.revokeObjectURL(url)
+    message.success('导出成功')
+  } catch (e: any) {
+    message.error(e.message || '导出失败')
+  }
 }
 
 onMounted(() => {
@@ -107,32 +124,25 @@ onUnmounted(() => {
   <div class="task-detail">
     <div class="detail-header">
       <div>
-        <n-button text @click="router.push('/')">← 返回</n-button>
+        <button class="back-btn" @click="router.push('/')">← 返回</button>
         <h1 class="page-title">任务详情</h1>
       </div>
       <div class="header-actions">
-        <n-button
+        <button
           v-if="task && (task.status === 'pending' || task.status === 'running')"
-          type="warning"
+          class="btn warning"
           @click="handleCancel"
-        >取消任务</n-button>
-        <n-button
+        >取消任务</button>
+        <button
           v-if="task && ['completed', 'failed', 'cancelled'].includes(task.status)"
-          type="primary"
+          class="btn primary"
           @click="handleRetry"
-        >重新测试</n-button>
-        <n-dropdown
-          v-if="task && task.status === 'completed'"
-          trigger="click"
-          :options="[
-            { label: '导出 Excel (.xlsx)', key: 'xlsx' },
-            { label: '导出 CSV', key: 'csv' },
-            { label: '导出 JSON', key: 'json' },
-          ]"
-          @select="handleExport"
-        >
-          <n-button>导出报表 ▼</n-button>
-        </n-dropdown>
+        >重新测试</button>
+        <div v-if="task && task.status === 'completed'" style="display:flex;gap:6px">
+          <button class="btn" @click="handleExport('xlsx')">📥 Excel</button>
+          <button class="btn" @click="handleExport('csv')">📥 CSV</button>
+          <button class="btn" @click="handleExport('json')">📥 JSON</button>
+        </div>
       </div>
     </div>
 
@@ -251,4 +261,20 @@ export default { name: 'TaskDetail' }
 .status-pending { background: #909399; color: white; }
 .status-failed { background: #d03050; color: white; }
 .status-cancelled { background: #f0a020; color: white; }
+
+.back-btn {
+  background: none; border: 1px solid var(--border-color); color: var(--text-secondary);
+  padding: 8px 14px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px;
+}
+.back-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.btn {
+  height: 34px; padding: 0 14px; border: 1px solid var(--border-color); background: var(--bg-card);
+  color: var(--text-primary); border-radius: var(--radius-sm); font-size: 13px; cursor: pointer;
+  font-weight: 500; transition: all var(--transition-fast);
+}
+.btn:hover { background: var(--bg-hover); border-color: var(--border-color-hover); }
+.btn.primary { background: var(--gradient-primary); color: white; border: none; }
+.btn.primary:hover { box-shadow: var(--shadow-glow); }
+.btn.warning { background: var(--color-warning); color: white; border: none; }
+.btn.warning:hover { opacity: 0.9; }
 </style>

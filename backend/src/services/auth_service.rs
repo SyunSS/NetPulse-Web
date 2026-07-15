@@ -53,12 +53,19 @@ impl AuthService {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
 
+        // 首个注册用户自动设为管理员
+        let total_count: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(pool)
+            .await?;
+        let role = if total_count == 0 { "admin" } else { "user" };
+
         sqlx::query(
-            "INSERT INTO users (id, username, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, 'user', ?, ?)",
+            "INSERT INTO users (id, username, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(&req.username)
         .bind(&password_hash)
+        .bind(role)
         .bind(&now)
         .bind(&now)
         .execute(pool)

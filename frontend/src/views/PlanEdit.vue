@@ -22,6 +22,64 @@ const cronCustom = ref('0 0 * * *')
 const enabled = ref(true)
 const items = ref<PlanItemInput[]>([])
 const saving = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
+
+// 文件批量导入
+function handleFileImport(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    const text = e.target?.result as string
+    if (!text) return
+    parseAndImport(text, file.name)
+  }
+  reader.readAsText(file)
+  // reset input
+  ;(event.target as HTMLInputElement).value = ''
+}
+
+function parseAndImport(text: string, filename: string) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('//') && !l.startsWith('#'))
+  if (lines.length === 0) { message.warning('文件中没有找到 URL'); return }
+
+  // 自动分组：按 task_type 标题行分组
+  const groups: Record<string, string[]> = { website: [], video: [], download: [] }
+  let currentType = 'website'
+
+  for (const line of lines) {
+    if (line.startsWith('[website]') || line === '网站测试') { currentType = 'website'; continue }
+    if (line.startsWith('[video]') || line === '视频测试') { currentType = 'video'; continue }
+    if (line.startsWith('[download]') || line === '下载测试') { currentType = 'download'; continue }
+    // URL 匹配
+    if (line.startsWith('http://') || line.startsWith('https://')) {
+      groups[currentType].push(line)
+    }
+  }
+
+  // 如果没有任何类型标签，全部归为 website
+  const allUrls = lines.filter(l => l.startsWith('http://') || l.startsWith('https://'))
+  if (allUrls.length > 0 && !Object.values(groups).some(g => g.length > 0)) {
+    groups.website = allUrls
+  }
+
+  // 为每个有数据的类型创建/追加 item
+  let added = 0
+  for (const [type, urls] of Object.entries(groups)) {
+    if (urls.length === 0) continue
+    // 查找现有同类型 item
+    const existing = items.value.find(it => it.task_type === type)
+    if (existing) {
+      existing.urls = [...new Set([...existing.urls.filter(u => u.trim()), ...urls])]
+    } else {
+      items.value.push({ task_type: type, urls, options: {} })
+    }
+    added += urls.length
+  }
+
+  message.success(`已从 ${filename} 导入 ${added} 个 URL（${added} 项）`)
+}
 
 const taskTypeOptions = [
   { value: 'website', label: '网站测试', color: 'var(--color-primary)' },
@@ -281,7 +339,11 @@ onMounted(() => {
       <section class="form-section">
         <div class="section-header">
           <h2 class="section-title">🎯 测试项 <span class="required">*</span></h2>
-          <button class="add-item-btn" @click="addItem">+ 添加测试项</button>
+          <div style="display:flex;gap:8px">
+            <input type="file" ref="fileInput" accept=".txt,.csv" style="display:none" @change="handleFileImport" />
+            <button class="action-btn" @click="fileInput?.click()">📄 导入文件</button>
+            <button class="add-item-btn" @click="addItem">+ 添加测试项</button>
+          </div>
         </div>
 
         <div v-if="items.length === 0" class="empty-items">
