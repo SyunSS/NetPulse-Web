@@ -251,3 +251,136 @@ pub fn export_csv<T: serde::Serialize>(data: &[T], task_id: &str, output_dir: &s
 pub fn export_json(data: &impl serde::Serialize) -> anyhow::Result<Vec<u8>> {
     Ok(serde_json::to_vec_pretty(data)?)
 }
+
+// === 计划运行合并导出 ===
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct TaskSummary {
+    pub task_id: String,
+    pub task_type: String,
+    pub status: String,
+    pub url: String,
+}
+
+pub fn export_plan_run_xlsx(
+    summaries: &[TaskSummary],
+    website_data: &[WebsiteResult],
+    video_data: &[VideoResult],
+    download_data: &[DownloadResult],
+    plan_id: &str,
+    run_id: &str,
+    output_dir: &str,
+) -> anyhow::Result<String> {
+    let filename = format!("{}/planrun_{}_{}_{}.xlsx", output_dir,
+        plan_id.chars().take(8).collect::<String>(),
+        run_id.chars().take(8).collect::<String>(),
+        Utc::now().timestamp());
+    let mut workbook = Workbook::new();
+
+    let header_fmt = Format::new().set_bold().set_font_color(Color::White)
+        .set_background_color(Color::RGB(0x4472C4)).set_border(FormatBorder::Thin);
+    let ok_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0x008000));
+    let err_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0xFF0000));
+    let url_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0x0563C1));
+
+    // 任务概览表
+    let summary = workbook.add_worksheet().set_name("任务概览")?;
+    let headers = ["任务ID", "任务类型", "状态", "URL"];
+    for (col, h) in headers.iter().enumerate() {
+        summary.write_with_format(0, col as u16, *h, &header_fmt)?;
+    }
+    for (i, s) in summaries.iter().enumerate() {
+        let row = (i + 1) as u32;
+        let fmt: &Format = if s.status == "completed" { &ok_fmt } else if s.status == "failed" { &err_fmt } else { &ok_fmt };
+        let type_label = match s.task_type.as_str() { "website" => "网站测试", "video" => "视频测试", "download" => "下载测试", _ => &s.task_type };
+        summary.write_with_format(row, 0, &s.task_id, fmt)?;
+        summary.write_with_format(row, 1, type_label, fmt)?;
+        summary.write_with_format(row, 2, &s.status, fmt)?;
+        summary.write_with_format(row, 3, &s.url, &url_fmt)?;
+    }
+    for col in 0..4u16 {
+        summary.set_column_width(col, 22.0)?;
+    }
+    summary.set_freeze_panes(1, 0)?;
+
+    // 网站测试结果
+    if !website_data.is_empty() {
+        let sheet = workbook.add_worksheet().set_name("网站测试")?;
+        let headers = ["URL", "DNS(ms)", "TCP(ms)", "TLS(ms)", "HTTP", "TTFB(ms)", "页面打开(ms)", "资源数", "大小(B)", "错误"];
+        for (col, h) in headers.iter().enumerate() {
+            sheet.write_with_format(0, col as u16, *h, &header_fmt)?;
+        }
+        for (i, r) in website_data.iter().enumerate() {
+            let row = (i + 1) as u32;
+            let has_err = r.error_msg.is_some();
+            let fmt = if has_err { &err_fmt } else { &ok_fmt };
+            sheet.write_with_format(row, 0, &r.url, &url_fmt)?;
+            write_num(sheet, row, 1, r.dns_time_ms, fmt)?;
+            write_num(sheet, row, 2, r.tcp_time_ms, fmt)?;
+            write_num(sheet, row, 3, r.tls_time_ms, fmt)?;
+            write_num_i32(sheet, row, 4, r.http_status, fmt)?;
+            write_num(sheet, row, 5, r.ttfb_ms, fmt)?;
+            write_num(sheet, row, 6, r.page_open_time_ms, fmt)?;
+            write_num_i32(sheet, row, 7, r.resource_count, fmt)?;
+            write_num_i32(sheet, row, 8, r.resource_total_size, fmt)?;
+            sheet.write_with_format(row, 9, r.error_msg.as_deref().unwrap_or(""), fmt)?;
+        }
+        for col in 0..headers.len() as u16 { sheet.set_column_width(col, 16.0)?; }
+        sheet.set_freeze_panes(1, 0)?;
+    }
+
+    // 视频测试结果
+    if !video_data.is_empty() {
+        let sheet = workbook.add_worksheet().set_name("视频测试")?;
+        let headers = ["URL", "平台", "首播(ms)", "缓冲", "缓冲时间(ms)", "下载速度(KB/s)", "大小(B)", "时长(ms)", "丢帧", "解码帧", "标题", "错误"];
+        for (col, h) in headers.iter().enumerate() {
+            sheet.write_with_format(0, col as u16, *h, &header_fmt)?;
+        }
+        for (i, r) in video_data.iter().enumerate() {
+            let row = (i + 1) as u32;
+            let ok = r.play_success == Some(1);
+            let fmt = if ok { &ok_fmt } else { &err_fmt };
+            sheet.write_with_format(row, 0, &r.url, &url_fmt)?;
+            sheet.write_with_format(row, 1, r.platform.as_deref().unwrap_or("-"), fmt)?;
+            write_num(sheet, row, 2, r.first_play_time_ms, fmt)?;
+            write_num_i32(sheet, row, 3, r.buffer_count, fmt)?;
+            write_num(sheet, row, 4, r.total_buffer_time_ms, fmt)?;
+            write_num(sheet, row, 5, r.video_download_speed, fmt)?;
+            write_num_i32(sheet, row, 6, r.video_size, fmt)?;
+            write_num(sheet, row, 7, r.video_duration_ms, fmt)?;
+            write_num_i32(sheet, row, 8, r.dropped_frames, fmt)?;
+            write_num_i32(sheet, row, 9, r.decoded_frames, fmt)?;
+            sheet.write_with_format(row, 10, r.page_title.as_deref().unwrap_or("-"), fmt)?;
+            sheet.write_with_format(row, 11, r.error_msg.as_deref().unwrap_or(""), fmt)?;
+        }
+        for col in 0..headers.len() as u16 { sheet.set_column_width(col, 14.0)?; }
+        sheet.set_freeze_panes(1, 0)?;
+    }
+
+    // 下载测试结果
+    if !download_data.is_empty() {
+        let sheet = workbook.add_worksheet().set_name("下载测试")?;
+        let headers = ["URL", "速度(KB/s)", "平均(KB/s)", "峰值(KB/s)", "耗时(ms)", "大小(B)", "状态", "错误"];
+        for (col, h) in headers.iter().enumerate() {
+            sheet.write_with_format(0, col as u16, *h, &header_fmt)?;
+        }
+        for (i, r) in download_data.iter().enumerate() {
+            let row = (i + 1) as u32;
+            let ok = r.success == Some(1);
+            let fmt = if ok { &ok_fmt } else { &err_fmt };
+            sheet.write_with_format(row, 0, &r.url, &url_fmt)?;
+            write_num(sheet, row, 1, r.download_speed, fmt)?;
+            write_num(sheet, row, 2, r.avg_speed, fmt)?;
+            write_num(sheet, row, 3, r.peak_speed, fmt)?;
+            write_num(sheet, row, 4, r.download_time_ms, fmt)?;
+            write_num_i32(sheet, row, 5, r.file_size, fmt)?;
+            sheet.write_with_format(row, 6, if ok { "成功" } else { "失败" }, fmt)?;
+            sheet.write_with_format(row, 7, r.error_msg.as_deref().unwrap_or(""), fmt)?;
+        }
+        for col in 0..headers.len() as u16 { sheet.set_column_width(col, 16.0)?; }
+        sheet.set_freeze_panes(1, 0)?;
+    }
+
+    workbook.save(&filename)?;
+    Ok(filename)
+}

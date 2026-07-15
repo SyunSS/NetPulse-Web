@@ -22,6 +22,7 @@ pub fn plan_routes() -> Router<AppState> {
         .route("/:id/delete", post(delete_plan))
         .route("/:id/run", post(run_plan))
         .route("/:id/runs", get(list_plan_runs))
+        .route("/:id/run/:run_id/export", get(export_plan_run))
 }
 
 #[derive(Debug, Deserialize)]
@@ -151,4 +152,184 @@ async fn list_plan_runs(
 #[derive(Debug, Deserialize)]
 struct RunListQuery {
     limit: Option<u32>,
+}
+
+/// 导出计划运行的全部 task 结果（合并到 1 个文件）
+async fn export_plan_run(
+    State(state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Path((plan_id, run_id)): Path<(String, String)>,
+    Query(q): Query<ExportQuery>,
+) -> Result<axum::response::Response, AppError> {
+    // 获取 plan_run 及其 task_ids
+    let run = sqlx::query_as::<_, crate::models::plan::TaskPlanRun>(
+        "SELECT * FROM task_plan_runs WHERE id = ? AND plan_id = ?",
+    )
+    .bind(&run_id)
+    .bind(&plan_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| AppError::internal(&e.to_string()))?
+    .ok_or_else(|| AppError::not_found("运行记录不存在"))?;
+
+    let task_ids: Vec<String> = serde_json::from_str(&run.task_ids).unwrap_or_default();
+
+    // 收集所有 task 的类型 + 结果
+    let mut website_data = Vec::new();
+    let mut video_data = Vec::new();
+    let mut download_data = Vec::new();
+    let mut task_summaries = Vec::new();
+
+    for tid in &task_ids {
+        // 查 task 类型
+        let task_row: Option<(String, String)> = sqlx::query_as(
+            "SELECT task_type, status FROM test_task WHERE id = ?",
+        )
+        .bind(tid)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| AppError::internal(&e.to_string()))?;
+
+        if let Some((task_type, status)) = task_row {
+            // 查每种类型的 url（用测试结果的 url 字段）
+            let url: String = match task_type.as_str() {
+                "website" => sqlx::query_scalar::<_, String>(
+                    "SELECT url FROM website_result WHERE task_id = ? LIMIT 1",
+                )
+                .bind(tid)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|e| AppError::internal(&e.to_string()))?
+                .unwrap_or_default(),
+                "video" => sqlx::query_scalar::<_, String>(
+                    "SELECT url FROM video_result WHERE task_id = ? LIMIT 1",
+                )
+                .bind(tid)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|e| AppError::internal(&e.to_string()))?
+                .unwrap_or_default(),
+                "download" => sqlx::query_scalar::<_, String>(
+                    "SELECT url FROM download_result WHERE task_id = ? LIMIT 1",
+                )
+                .bind(tid)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|e| AppError::internal(&e.to_string()))?
+                .unwrap_or_default(),
+                _ => String::new(),
+            };
+
+            task_summaries.push(crate::report::excel::TaskSummary {
+                task_id: tid.clone(),
+                task_type: task_type.clone(),
+                status: status.clone(),
+                url,
+            });
+
+            // 查结果
+            match task_type.as_str() {
+                "website" => {
+                    let results: Vec<crate::models::task::WebsiteResult> = sqlx::query_as(
+                        "SELECT * FROM website_result WHERE task_id = ?",
+                    )
+                    .bind(tid)
+                    .fetch_all(&state.db)
+                    .await
+                    .map_err(|e| AppError::internal(&e.to_string()))?;
+                    website_data.extend(results);
+                }
+                "video" => {
+                    let results: Vec<crate::models::task::VideoResult> = sqlx::query_as(
+                        "SELECT * FROM video_result WHERE task_id = ?",
+                    )
+                    .bind(tid)
+                    .fetch_all(&state.db)
+                    .await
+                    .map_err(|e| AppError::internal(&e.to_string()))?;
+                    video_data.extend(results);
+                }
+                "download" => {
+                    let results: Vec<crate::models::task::DownloadResult> = sqlx::query_as(
+                        "SELECT * FROM download_result WHERE task_id = ?",
+                    )
+                    .bind(tid)
+                    .fetch_all(&state.db)
+                    .await
+                    .map_err(|e| AppError::internal(&e.to_string()))?;
+                    download_data.extend(results);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // 拼装响应
+    let body = match q.format.as_str() {
+        "xlsx" => {
+            use crate::report::excel;
+            let dir = &state.config.storage.excel_dir;
+            let path = excel::export_plan_run_xlsx(
+                &task_summaries, &website_data, &video_data, &download_data,
+                &plan_id, &run_id, dir,
+            )
+            .map_err(|e| AppError::internal(&e.to_string()))?;
+            std::fs::read(&path).map_err(|e| AppError::internal(&e.to_string()))?
+        }
+        "csv" => {
+            let mut buf = Vec::new();
+            {
+                let mut wtr = csv::Writer::from_writer(&mut buf);
+                wtr.write_record(&["task_type", "task_id", "status", "url", "extra"])
+                    .map_err(|e| AppError::internal(&e.to_string()))?;
+                for s in &task_summaries {
+                    wtr.write_record(&[&s.task_type, &s.task_id, &s.status, &s.url, ""])
+                        .map_err(|e| AppError::internal(&e.to_string()))?;
+                }
+                wtr.flush().map_err(|e| AppError::internal(&e.to_string()))?;
+            }
+            buf
+        }
+        _ => {
+            // 默认 JSON
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "plan_id": plan_id,
+                "run_id": run_id,
+                "tasks": task_summaries,
+                "website_results": website_data,
+                "video_results": video_data,
+                "download_results": download_data,
+            }))
+            .map_err(|e| AppError::internal(&e.to_string()))?
+        }
+    };
+
+    let ext = match q.format.as_str() {
+        "xlsx" => "xlsx",
+        "csv" => "csv",
+        _ => "json",
+    };
+    let mime = match q.format.as_str() {
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "csv" => "text/csv",
+        _ => "application/json",
+    };
+    let run_id_short: String = run_id.chars().take(8).collect();
+    let filename = format!("plan_run_{}.{}", run_id_short, ext);
+
+    Ok(axum::response::Response::builder()
+        .header(axum::http::header::CONTENT_TYPE, mime)
+        .header(axum::http::header::CONTENT_DISPOSITION, format!("attachment; filename={}", filename))
+        .body(axum::body::Body::from(body))
+        .unwrap())
+}
+
+#[derive(Debug, Deserialize)]
+struct ExportQuery {
+    #[serde(default = "default_export_format")]
+    format: String,
+}
+
+fn default_export_format() -> String {
+    "json".to_string()
 }

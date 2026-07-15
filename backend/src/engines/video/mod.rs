@@ -271,27 +271,36 @@ fn test_video_blocking(
         decoded_frames: Some(final_data.decoded_frames),
         page_title: title,
         screenshot,
-        error: if final_data.play_success {
-            None
+        error: if !final_data.play_success && final_data.first_play_time_ms.is_none() {
+            Some("视频未检测到播放事件（页面已加载）".to_string())
         } else {
-            Some("视频播放失败".to_string())
+            None
         },
     }
 }
 
-/// 构建注入 JS — 使用配置的 CSS 选择器
+/// 构建注入 JS — 使用配置的 CSS 选择器 + 多重 fallback
 fn build_inject_js(video_selector: &str, play_duration: Duration) -> String {
     let play_ms = play_duration.as_millis();
     let selector_escaped = video_selector.replace('\\', "\\\\").replace('\'', "\\'");
     format!(
         r#"
 (() => {{
-    // 使用平台配置的 CSS 选择器查找 video 元素
-    let video = document.querySelector('{0}');
+    // 多选择器 fallback：先试配置的，找不到再试通用 video
+    const selectors = ['{0}', 'video', '.video video', '#video', 'video.html5-main-video'];
+    let video = null;
+    for (const sel of selectors) {{
+        const el = document.querySelector(sel);
+        if (el && el.tagName === 'VIDEO') {{ video = el; break; }}
+    }}
     if (!video) {{
-        // 如果配置的选择器没找到，降级为任意 video
-        video = document.querySelector('video');
-        if (!video) return {{ error: 'no video element', play_success: false }};
+        // 找页面里所有 video 元素
+        const all = document.querySelectorAll('video');
+        if (all.length > 0) video = all[0];
+    }}
+    if (!video) {{
+        window.__videoStats = {{ page_loaded: true, error: 'no_video_element', play_success: false }};
+        return {{ page_loaded: true, error: 'no_video_element' }};
     }}
 
     window.__videoStats = {{
@@ -304,10 +313,12 @@ fn build_inject_js(video_selector: &str, play_duration: Duration) -> String {
         video_duration_ms: null,
         dropped_frames: 0,
         decoded_frames: 0,
+        page_loaded: true,
         _buffer_start: null,
         _start_time: performance.now()
     }};
 
+    // 监听 playing 事件
     video.addEventListener('playing', () => {{
         if (window.__videoStats.first_play_time_ms === null) {{
             window.__videoStats.first_play_time_ms = performance.now() - window.__videoStats._start_time;
@@ -328,6 +339,15 @@ fn build_inject_js(video_selector: &str, play_duration: Duration) -> String {
         window.__videoStats.video_duration_ms = video.duration ? video.duration * 1000 : null;
     }});
 
+    // 延迟检测：如果 5 秒内已经播放过，标记为成功
+    setTimeout(() => {{
+        if (!window.__videoStats.play_success && !video.paused && video.currentTime > 0) {{
+            window.__videoStats.first_play_time_ms = performance.now() - window.__videoStats._start_time;
+            window.__videoStats.play_success = true;
+        }}
+    }}, 5000);
+
+    // 尝试播放
     video.play().catch(() => {{}});
 
     // 采集资源大小
@@ -335,13 +355,14 @@ fn build_inject_js(video_selector: &str, play_duration: Duration) -> String {
     let videoSize = 0;
     for (const r of resources) {{
         if (r.initiatorType === 'video' || r.initiatorType === 'xmlhttprequest' ||
-            r.name.includes('.mp4') || r.name.includes('.m3u8') || r.name.includes('.mpd')) {{
+            r.name.includes('.mp4') || r.name.includes('.m3u8') || r.name.includes('.mpd') ||
+            r.name.includes('.flv')) {{
             videoSize += r.transferSize || 0;
         }}
     }}
     window.__videoStats.video_size = videoSize || null;
 
-    return {{ injected: true }};
+    return {{ injected: true, video_tag: video.tagName }};
 }})()
 "#, selector_escaped
     )

@@ -17,34 +17,59 @@ const planId = route.params.id as string
 const ws = getWsClient()
 let unsubWs: (() => void) | null = null
 
+interface TaskMeta { id: string; type: string; status: string }
+const taskMeta = ref<Record<string, TaskMeta>>({})
+
 function parseTaskIds(ids: string): string[] {
   try { return JSON.parse(ids) } catch { return [] }
 }
+
+async function fetchTaskMeta(ids: string[]) {
+  // 从 /api/plan/:id/runs 返回的数据里没有 type — 我们用 /api/task/list 查
+  for (const tid of ids) {
+    if (taskMeta.value[tid]) continue
+    try {
+      const r = await fetch(`/api/task/${tid}`, { headers: { Authorization: `Bearer ${authStore.token}` } })
+      if (r.ok) {
+        const data = (await r.json()).data
+        taskMeta.value[tid] = { id: tid, type: data.task_type, status: data.status }
+      }
+    } catch {}
+  }
+}
+
+const typeLabel = (t: string) => t === 'website' ? '网站测试' : t === 'video' ? '视频测试' : t === 'download' ? '下载测试' : t
+const typeColor = (t: string) => t === 'website' ? 'var(--color-primary)' : t === 'video' ? 'var(--color-warning)' : 'var(--color-success)'
 
 function handleWsMessage(msg: ProgressMessage) {
   if (msg.task_id === planId) planStore.fetchPlanRuns(planId)
 }
 
-async function handleExport(taskId: string, format: string, type: string) {
+/** 整次运行合并导出（1 个文件） */
+async function exportRun(runId: string, format: 'xlsx' | 'csv' | 'json') {
   try {
-    const url = type === 'website' ? `/api/task/${taskId}/export?format=${format}`
-      : type === 'video' ? `/api/task/${taskId}/export?format=${format}`
-      : `/api/task/${taskId}/export?format=${format}`
-    const resp = await fetch(url, { headers: { Authorization: `Bearer ${authStore.token}` } })
+    const resp = await fetch(`/api/plan/${planId}/run/${runId}/export?format=${format}`, {
+      headers: { Authorization: `Bearer ${authStore.token}` },
+    })
     if (!resp.ok) throw new Error('导出失败')
     const blob = await resp.blob()
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = `result_${taskId.substring(0, 8)}.${format === 'xlsx' ? 'xlsx' : format === 'csv' ? 'csv' : 'json'}`
+    a.download = `plan_run_${runId.substring(0, 8)}.${format === 'xlsx' ? 'xlsx' : format === 'csv' ? 'csv' : 'json'}`
     a.click()
     URL.revokeObjectURL(a.href)
     message.success('导出成功')
   } catch (e: any) { message.error(e.message || '导出失败') }
 }
 
-onMounted(() => {
-  planStore.fetchPlan(planId)
-  planStore.fetchPlanRuns(planId)
+onMounted(async () => {
+  await planStore.fetchPlan(planId)
+  await planStore.fetchPlanRuns(planId)
+  // 抓所有 task 的 type
+  for (const run of planStore.planRuns) {
+    const ids = parseTaskIds(run.task_ids)
+    if (ids.length > 0) await fetchTaskMeta(ids)
+  }
   ws.connect(planId)
   unsubWs = ws.onMessage(handleWsMessage)
 })
@@ -92,25 +117,34 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
         </div>
 
         <div class="run-body">
-          <div class="run-detail">
-            <span class="detail-label">任务数:</span>
-            <span class="detail-value">{{ run.task_count }} 个</span>
-          </div>
+          <div class="run-detail"><span class="detail-label">任务数:</span><span class="detail-value">{{ run.task_count }} 个</span></div>
           <div class="run-detail" v-if="run.finished_at">
             <span class="detail-label">耗时:</span>
             <span class="detail-value">{{ Math.round((new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()) / 1000) }} 秒</span>
           </div>
         </div>
 
-        <!-- 任务列表 + 操作 -->
+        <!-- 任务列表 -->
         <div class="task-links" v-if="parseTaskIds(run.task_ids).length > 0">
           <div class="task-links-title">关联任务:</div>
           <div v-for="tid in parseTaskIds(run.task_ids)" :key="tid" class="task-link-row">
-            <code class="task-id">{{ tid.substring(0, 8) }}...</code>
-            <button class="btn sm" @click="router.push(`/task/${tid}`)">📊 查看详情</button>
-            <button class="btn sm" @click="handleExport(tid, 'json', '')">📥 JSON</button>
-            <button class="btn sm" @click="handleExport(tid, 'csv', '')">📥 CSV</button>
+            <span class="task-type-badge" :style="{ background: typeColor(taskMeta[tid]?.type || '') + '20', color: typeColor(taskMeta[tid]?.type || '') }">
+              {{ typeLabel(taskMeta[tid]?.type || '...') }}
+            </span>
+            <code class="task-id" @click="router.push(`/task/${tid}`)">{{ tid.substring(0, 8) }}...</code>
+            <span v-if="taskMeta[tid]" class="task-status-mini" :class="`mini-${taskMeta[tid].status}`">
+              {{ taskMeta[tid].status }}
+            </span>
+            <button class="btn sm" @click="router.push(`/task/${tid}`)">📊 详情</button>
           </div>
+        </div>
+
+        <!-- 整次运行导出 -->
+        <div class="run-export" v-if="run.status === 'completed'">
+          <span class="export-label">导出整次结果:</span>
+          <button class="btn sm primary" @click="exportRun(run.id, 'xlsx')">📥 Excel</button>
+          <button class="btn sm" @click="exportRun(run.id, 'csv')">📥 CSV</button>
+          <button class="btn sm" @click="exportRun(run.id, 'json')">📥 JSON</button>
         </div>
       </div>
     </div>
@@ -148,6 +182,14 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
 .detail-value { color: var(--text-primary); font-family: var(--font-mono); font-size: 12px; }
 .task-links { padding-top: 8px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 6px; }
 .task-links-title { font-size: 12px; color: var(--text-tertiary); font-weight: 500; }
-.task-link-row { display: flex; align-items: center; gap: 6px; }
-.task-id { font-size: 11px; color: var(--color-primary); background: rgba(32,128,240,0.08); padding: 2px 6px; border-radius: 4px; }
+.task-link-row { display: flex; align-items: center; gap: 8px; }
+.task-type-badge { padding: 2px 8px; font-size: 11px; font-weight: 500; border-radius: 4px; }
+.task-id { font-size: 11px; color: var(--color-primary); background: rgba(32,128,240,0.08); padding: 3px 8px; border-radius: 4px; cursor: pointer; font-family: var(--font-mono); }
+.task-id:hover { background: rgba(32,128,240,0.15); }
+.task-status-mini { font-size: 11px; padding: 2px 6px; border-radius: 4px; }
+.mini-completed { background: rgba(24,160,88,0.15); color: var(--color-success); }
+.mini-failed { background: rgba(208,48,80,0.15); color: var(--color-danger); }
+.mini-running, .mini-pending { background: rgba(32,128,240,0.15); color: var(--color-primary); }
+.run-export { display: flex; align-items: center; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border-color); }
+.export-label { font-size: 12px; color: var(--text-tertiary); margin-right: 4px; }
 </style>
