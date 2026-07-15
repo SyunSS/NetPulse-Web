@@ -27,7 +27,7 @@ COPY frontend/ ./
 RUN pnpm install --no-frozen-lockfile && pnpm build
 
 # ====== 阶段3: 运行镜像 ======
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libssl3 chromium fonts-noto-cjk fonts-liberation wget \
