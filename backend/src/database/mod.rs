@@ -186,14 +186,13 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         CREATE TABLE IF NOT EXISTS task_plan_runs (
             id TEXT PRIMARY KEY,
             plan_id TEXT NOT NULL,
-            task_id TEXT,
+            task_ids TEXT NOT NULL DEFAULT '[]',
             triggered_by TEXT NOT NULL,
             started_at TEXT NOT NULL,
             finished_at TEXT,
             status TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE,
-            FOREIGN KEY (task_id) REFERENCES test_task(id) ON DELETE SET NULL
+            FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE
         );
         "#,
     ];

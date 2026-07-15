@@ -3,7 +3,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::models::plan::{
-    CreatePlanRequest, PlanItemInput, PlanWithItems, RunPlanResponse, TaskPlan, TaskPlanItem,
+    CreatePlanRequest, PlanItemInput, PlanWithItems, PlanRunWithTasks, RunPlanResponse, TaskPlan, TaskPlanItem,
     TaskPlanRun, UpdatePlanRequest,
 };
 use crate::utils::response::{ProgressMessage, TaskJob};
@@ -292,13 +292,6 @@ impl PlanService {
             .execute(db)
             .await?;
 
-            // 关联 plan_run 和 task
-            sqlx::query("UPDATE task_plan_runs SET task_id = ? WHERE id = ?")
-                .bind(&task_id)
-                .bind(&plan_run_id)
-                .execute(db)
-                .await?;
-
             // 解析 urls
             let urls: Vec<String> = serde_json::from_str(&item.urls).unwrap_or_default();
 
@@ -316,6 +309,14 @@ impl PlanService {
             task_ids.push(task_id);
         }
 
+        // 一次性写入所有 task_ids JSON 数组
+        let task_ids_json = serde_json::to_string(&task_ids)?;
+        sqlx::query("UPDATE task_plan_runs SET task_ids = ? WHERE id = ?")
+            .bind(&task_ids_json)
+            .bind(&plan_run_id)
+            .execute(db)
+            .await?;
+
         // 更新 last_run_at
         sqlx::query("UPDATE task_plans SET last_run_at = ? WHERE id = ?")
             .bind(&now)
@@ -329,12 +330,12 @@ impl PlanService {
         })
     }
 
-    /// 列出计划运行历史
+    /// 列出计划运行历史（含已完成任务数）
     pub async fn list_plan_runs(
         db: &SqlitePool,
         plan_id: &str,
         limit: u32,
-    ) -> anyhow::Result<Vec<TaskPlanRun>> {
+    ) -> anyhow::Result<Vec<PlanRunWithTasks>> {
         let runs = sqlx::query_as::<_, TaskPlanRun>(
             "SELECT * FROM task_plan_runs WHERE plan_id = ? ORDER BY started_at DESC LIMIT ?",
         )
@@ -342,7 +343,41 @@ impl PlanService {
         .bind(limit)
         .fetch_all(db)
         .await?;
-        Ok(runs)
+
+        let mut results = Vec::new();
+        for run in runs {
+            let task_ids: Vec<String> = serde_json::from_str(&run.task_ids).unwrap_or_default();
+            let task_count = task_ids.len();
+
+            // 查询已完成的 task 数量
+            let completed_count = if task_count > 0 {
+                let placeholders: Vec<String> = task_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+                let query = format!(
+                    "SELECT COUNT(*) FROM test_task WHERE id IN ({}) AND status IN ('completed', 'failed', 'cancelled')",
+                    placeholders.join(",")
+                );
+                let mut q = sqlx::query_scalar(&query);
+                for tid in &task_ids {
+                    q = q.bind(tid);
+                }
+                q.fetch_one(db).await.unwrap_or(0)
+            } else {
+                0
+            } as usize;
+
+            // 自动更新 plan_run 状态
+            if completed_count == task_count && task_count > 0 && run.status == "running" {
+                let _ = Self::complete_plan_run(db, &run.id, "completed").await;
+            }
+
+            results.push(PlanRunWithTasks {
+                run,
+                task_count,
+                completed_count: completed_count as usize,
+            });
+        }
+
+        Ok(results)
     }
 
     /// 标记 plan_run 完成

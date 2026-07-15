@@ -33,12 +33,21 @@ pub struct TaskPlanItem {
 pub struct TaskPlanRun {
     pub id: String,
     pub plan_id: String,
-    pub task_id: Option<String>,
-    pub triggered_by: String,  // 'manual' | 'cron'
+    pub task_ids: String,       // JSON 数组: ["task1_id", "task2_id"]
+    pub triggered_by: String,
     pub started_at: String,
     pub finished_at: Option<String>,
     pub status: String,
     pub created_at: String,
+}
+
+/// 计划运行的扩展信息（返回给前端）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanRunWithTasks {
+    #[serde(flatten)]
+    pub run: TaskPlanRun,
+    pub task_count: usize,
+    pub completed_count: usize,
 }
 
 /// 计划项 DTO（前端传入）

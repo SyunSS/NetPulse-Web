@@ -5,7 +5,7 @@ use axum::Router;
 use serde::Deserialize;
 
 use crate::models::plan::{
-    CreatePlanRequest, PlanListResponse, PlanWithItems, RunPlanResponse, TaskPlanRun,
+    CreatePlanRequest, PlanListResponse, PlanWithItems, PlanRunWithTasks, RunPlanResponse,
     UpdatePlanRequest,
 };
 use crate::services::auth_service::Claims;
@@ -141,7 +141,7 @@ async fn list_plan_runs(
     Extension(_claims): Extension<Claims>,
     Path(plan_id): Path<String>,
     Query(q): Query<RunListQuery>,
-) -> Result<Json<crate::utils::response::ApiResponse<Vec<TaskPlanRun>>>, AppError> {
+) -> Result<Json<crate::utils::response::ApiResponse<Vec<PlanRunWithTasks>>>, AppError> {
     let runs = PlanService::list_plan_runs(&state.db, &plan_id, q.limit.unwrap_or(20))
         .await
         .map_err(|e| AppError::internal(&e.to_string()))?;

@@ -131,6 +131,7 @@ impl PlanScheduler {
         }
 
         // 为每个 item 创建 task 并派发
+        let mut all_task_ids: Vec<String> = Vec::new();
         for item in &items {
             let task_id = Uuid::new_v4().to_string();
             let config = serde_json::json!({
@@ -144,40 +145,27 @@ impl PlanScheduler {
             sqlx::query(
                 "INSERT INTO test_task (id, user_id, task_type, status, config, progress, created_at) VALUES (?, ?, ?, 'pending', ?, 0, ?)",
             )
-            .bind(&task_id)
-            .bind(&plan.user_id)
-            .bind(&item.task_type)
-            .bind(config.to_string())
-            .bind(&now)
-            .execute(&self.db)
-            .await?;
+            .bind(&task_id).bind(&plan.user_id).bind(&item.task_type)
+            .bind(config.to_string()).bind(&now)
+            .execute(&self.db).await?;
 
-            // 关联 plan_run 和 task（取最后一个关联，简单处理）
-            let _ = sqlx::query("UPDATE task_plan_runs SET task_id = ? WHERE id = ?")
-                .bind(&task_id)
-                .bind(&plan_run_id)
-                .execute(&self.db)
-                .await;
-
-            // 解析 urls
             let urls: Vec<String> = serde_json::from_str(&item.urls).unwrap_or_default();
-
-            // 派发到 Worker
             let job = TaskJob {
-                task_id: task_id.clone(),
-                user_id: plan.user_id.clone(),
-                task_type: item.task_type.clone(),
-                urls,
-                options: serde_json::from_str(
-                    &item.options.clone().unwrap_or_else(|| "null".to_string()),
-                )
-                .unwrap_or(serde_json::Value::Null),
+                task_id: task_id.clone(), user_id: plan.user_id.clone(),
+                task_type: item.task_type.clone(), urls,
+                options: serde_json::from_str(item.options.as_deref().unwrap_or("null")).unwrap_or(serde_json::Value::Null),
             };
-
             if let Err(e) = self.task_tx.send(job).await {
-                error!("派发任务到 Worker 失败: {}", e);
+                error!("派发失败: {}", e);
             }
+            all_task_ids.push(task_id);
         }
+
+        // 一次性写入所有 task_ids JSON
+        let task_ids_json = serde_json::to_string(&all_task_ids).unwrap_or_default();
+        let _ = sqlx::query("UPDATE task_plan_runs SET task_ids = ? WHERE id = ?")
+            .bind(&task_ids_json).bind(&plan_run_id)
+            .execute(&self.db).await;
 
         // 更新 last_run_at
         let _ = sqlx::query("UPDATE test_task SET status = 'pending' WHERE id IN (SELECT task_id FROM task_plan_runs WHERE id = ?)")
