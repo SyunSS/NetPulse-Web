@@ -55,9 +55,14 @@ export interface VideoResult {
   task_id: string
   url: string
   platform: string | null
+  dns_time_ms: number | null
+  dns_success: number | null
+  tcp_time_ms: number | null
+  http_response_ms: number | null
   first_play_time_ms: number | null
   buffer_count: number | null
   total_buffer_time_ms: number | null
+  buffer_rate: number | null
   play_success: number | null
   video_download_speed: number | null
   video_size: number | null
@@ -74,6 +79,9 @@ export interface DownloadResult {
   id: string
   task_id: string
   url: string
+  dns_time_ms: number | null
+  dns_success: number | null
+  tcp_time_ms: number | null
   download_speed: number | null
   avg_speed: number | null
   peak_speed: number | null

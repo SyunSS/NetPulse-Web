@@ -473,9 +473,14 @@ async fn run_video_task(
                     task_id: task_id.clone(),
                     url: url.clone(),
                     platform: None,
+                    dns_time_ms: None,
+                    dns_success: None,
+                    tcp_time_ms: None,
+                    http_response_ms: None,
                     first_play_time_ms: None,
                     buffer_count: None,
                     total_buffer_time_ms: None,
+                    buffer_rate: None,
                     play_success: Some(0),
                     video_download_speed: None,
                     video_size: None,
@@ -556,9 +561,14 @@ async fn test_single_video(
         task_id: task_id.to_string(),
         url: url.to_string(),
         platform: Some(video_result.platform),
+        dns_time_ms: video_result.dns_time_ms,
+        dns_success: Some(if video_result.dns_success { 1 } else { 0 }),
+        tcp_time_ms: video_result.tcp_time_ms,
+        http_response_ms: video_result.http_response_ms,
         first_play_time_ms: video_result.first_play_time_ms,
         buffer_count: video_result.buffer_count,
         total_buffer_time_ms: video_result.total_buffer_time_ms,
+        buffer_rate: video_result.buffer_rate,
         play_success: Some(if video_result.play_success { 1 } else { 0 }),
         video_download_speed: video_result.video_download_speed,
         video_size: video_result.video_size,
@@ -580,18 +590,24 @@ async fn test_single_video(
 async fn save_video_result(db: &SqlitePool, result: &VideoResult) -> anyhow::Result<()> {
     sqlx::query(
         r#"INSERT INTO video_result (
-            id, task_id, url, platform, first_play_time_ms, buffer_count,
-            total_buffer_time_ms, play_success, video_download_speed, video_size,
-            video_duration_ms, dropped_frames, decoded_frames, screenshot_path, page_title, error_msg, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            id, task_id, url, platform, dns_time_ms, dns_success, tcp_time_ms, http_response_ms,
+            first_play_time_ms, buffer_count, total_buffer_time_ms, buffer_rate,
+            play_success, video_download_speed, video_size, video_duration_ms,
+            dropped_frames, decoded_frames, screenshot_path, page_title, error_msg, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(&result.id)
     .bind(&result.task_id)
     .bind(&result.url)
     .bind(&result.platform)
+    .bind(result.dns_time_ms)
+    .bind(result.dns_success)
+    .bind(result.tcp_time_ms)
+    .bind(result.http_response_ms)
     .bind(result.first_play_time_ms)
     .bind(result.buffer_count)
     .bind(result.total_buffer_time_ms)
+    .bind(result.buffer_rate)
     .bind(result.play_success)
     .bind(result.video_download_speed)
     .bind(result.video_size)
@@ -641,6 +657,9 @@ async fn run_download_task(
             id: Uuid::new_v4().to_string(),
             task_id: task_id.clone(),
             url: url.clone(),
+            dns_time_ms: None,
+            dns_success: None,
+            tcp_time_ms: None,
             download_speed: Some(result.download_speed),
             avg_speed: Some(result.avg_speed),
             peak_speed: Some(result.peak_speed),
@@ -671,9 +690,10 @@ async fn run_download_task(
 
 async fn save_download_result(db: &SqlitePool, result: &DownloadResult) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO download_result (id, task_id, url, download_speed, avg_speed, peak_speed, download_time_ms, file_size, success, error_msg, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO download_result (id, task_id, url, dns_time_ms, dns_success, tcp_time_ms, download_speed, avg_speed, peak_speed, download_time_ms, file_size, success, error_msg, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&result.id).bind(&result.task_id).bind(&result.url)
+    .bind(result.dns_time_ms).bind(result.dns_success).bind(result.tcp_time_ms)
     .bind(result.download_speed).bind(result.avg_speed).bind(result.peak_speed)
     .bind(result.download_time_ms).bind(result.file_size).bind(result.success)
     .bind(&result.error_msg).bind(&result.created_at)

@@ -17,8 +17,10 @@ export interface TaskPlanItem {
   id: string
   plan_id: string
   task_type: string
-  urls: string        // JSON 数组
+  urls: string
   options: string | null
+  repeat_count: number
+  engine: string | null
   order_index: number
   created_at: string
 }
@@ -27,6 +29,8 @@ export interface PlanItemInput {
   task_type: string
   urls: string[]
   options?: Record<string, unknown>
+  repeat_count?: number
+  engine?: string
 }
 
 export interface PlanWithItems {

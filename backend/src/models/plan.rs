@@ -22,8 +22,10 @@ pub struct TaskPlanItem {
     pub id: String,
     pub plan_id: String,
     pub task_type: String,
-    pub urls: String,        // JSON 数组
-    pub options: Option<String>, // JSON 对象
+    pub urls: String,
+    pub options: Option<String>,
+    pub repeat_count: i32,
+    pub engine: Option<String>,
     pub order_index: i32,
     pub created_at: String,
 }
@@ -57,7 +59,14 @@ pub struct PlanItemInput {
     pub urls: Vec<String>,
     #[serde(default)]
     pub options: serde_json::Value,
+    #[serde(default = "default_repeat")]
+    pub repeat_count: i32,
+    #[serde(default = "default_engine")]
+    pub engine: String,
 }
+
+fn default_repeat() -> i32 { 1 }
+fn default_engine() -> String { "headless_chrome".to_string() }
 
 /// 创建计划请求
 #[derive(Debug, Clone, Serialize, Deserialize)]

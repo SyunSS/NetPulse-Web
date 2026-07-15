@@ -7,14 +7,21 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
 use crate::config::VideoPlatformConfig;
+use crate::engines::dns::DnsEngine;
+use crate::engines::http::HttpEngine;
 
 /// 视频测试结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct VideoTestResult {
     pub platform: String,
+    pub dns_time_ms: Option<f64>,
+    pub dns_success: bool,
+    pub tcp_time_ms: Option<f64>,
+    pub http_response_ms: Option<f64>,
     pub first_play_time_ms: Option<f64>,
     pub buffer_count: Option<i32>,
     pub total_buffer_time_ms: Option<f64>,
+    pub buffer_rate: Option<f64>,
     pub play_success: bool,
     pub video_download_speed: Option<f64>,
     pub video_size: Option<i32>,
@@ -48,9 +55,22 @@ impl VideoEngine {
     pub async fn test_page(&self, url: &str, platform_cfg: &VideoPlatformConfig) -> VideoTestResult {
         info!("视频测试开始: {} (平台: {})", url, platform_cfg.name);
 
+        // 1. DNS 探测
+        let dns_result = DnsEngine::resolve(url).await.unwrap_or_else(|_| {
+            crate::engines::dns::DnsResult { dns_time_ms: 0.0, dns_success: false, resolved_ips: vec![] }
+        });
+
+        // 2. HTTP/TCP 探测
+        let http_result = HttpEngine::probe(url, self.timeout).await;
+
         // 仅检测可访问性的平台（如 Netflix）
         if platform_cfg.is_detect_only() {
-            return self.test_detect_only(url, platform_cfg).await;
+            let mut r = self.test_detect_only(url, platform_cfg).await;
+            r.dns_time_ms = Some(dns_result.dns_time_ms);
+            r.dns_success = dns_result.dns_success;
+            r.tcp_time_ms = Some(http_result.tcp_time_ms);
+            r.http_response_ms = Some(http_result.ttfb_ms);
+            return r;
         }
 
         let chrome_path = self.chrome_path.clone();
@@ -92,6 +112,7 @@ impl VideoEngine {
                     page_title: None,
                     screenshot: None,
                     error: Some(format!("任务执行失败: {}", e)),
+                ..Default::default()
                 }
             }
         }
@@ -157,6 +178,7 @@ impl VideoEngine {
                 } else {
                     Some("页面无法访问".to_string())
                 },
+            ..Default::default()
             }
         })
         .await;
@@ -276,6 +298,7 @@ fn test_video_blocking(
         } else {
             None
         },
+    ..Default::default()
     }
 }
 
@@ -466,5 +489,6 @@ fn error_result(platform: &str, msg: &str) -> VideoTestResult {
         page_title: None,
         screenshot: None,
         error: Some(msg.to_string()),
+    ..Default::default()
     }
 }

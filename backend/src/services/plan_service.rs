@@ -60,14 +60,16 @@ impl PlanService {
             };
 
             sqlx::query(
-                "INSERT INTO task_plan_items (id, plan_id, task_type, urls, options, order_index, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO task_plan_items (id, plan_id, task_type, urls, options, repeat_count, engine, order_index, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&item_id)
             .bind(&plan_id)
             .bind(&item.task_type)
             .bind(&urls_json)
             .bind(&options_json)
+            .bind(item.repeat_count)
+            .bind(&item.engine)
             .bind(idx as i32)
             .bind(&now)
             .execute(db)
