@@ -36,7 +36,7 @@ function handleRetry(taskId: string) {
   router.push('/task/' + taskId)
 }
 
-const typeLabel = (t: string) => t === 'website' ? '网站测试' : t === 'video' ? '视频测试' : t === 'download' ? '下载测试' : t
+const typeLabel = (t: string) => t === 'website' ? '网站测试' : t === 'video' ? '视频测试' : t === 'download' ? '下载测试' : t === 'ping' ? 'Ping 测试' : t
 const statusLabel = (s: string) => s === 'completed' ? '已完成' : s === 'running' ? '运行中' : s === 'pending' ? '等待' : s === 'failed' ? '失败' : s === 'cancelled' ? '取消' : s
 const stClass = (s: string) => `st st-${s}`
 

@@ -44,8 +44,8 @@ async function fetchTaskMeta(ids: string[]) {
   }
 }
 
-const typeLabel = (t: string) => t === 'website' ? '网站测试' : t === 'video' ? '视频测试' : t === 'download' ? '下载测试' : t
-const typeColor = (t: string) => t === 'website' ? 'var(--color-primary)' : t === 'video' ? 'var(--color-warning)' : 'var(--color-success)'
+const typeLabel = (t: string) => t === 'website' ? '网站测试' : t === 'video' ? '视频测试' : t === 'download' ? '下载测试' : t === 'ping' ? 'Ping 测试' : t
+const typeColor = (t: string) => t === 'website' ? 'var(--color-primary)' : t === 'video' ? 'var(--color-warning)' : t === 'download' ? 'var(--color-success)' : t === 'ping' ? 'var(--color-info)' : 'var(--text-secondary)'
 
 function handleWsMessage(msg: ProgressMessage) {
   if (msg.task_id !== planId) return

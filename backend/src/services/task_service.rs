@@ -134,6 +134,20 @@ impl TaskService {
         Ok(results)
     }
 
+    /// 获取 Ping 测试结果
+    pub async fn get_ping_results(
+        db: &SqlitePool,
+        task_id: &str,
+    ) -> anyhow::Result<Vec<crate::models::task::PingResult>> {
+        let results = sqlx::query_as::<_, crate::models::task::PingResult>(
+            "SELECT * FROM ping_result WHERE task_id = ? ORDER BY created_at ASC",
+        )
+        .bind(task_id)
+        .fetch_all(db)
+        .await?;
+        Ok(results)
+    }
+
     /// 取消任务
     pub async fn cancel_task(db: &SqlitePool, task_id: &str) -> anyhow::Result<()> {
         let now = Utc::now().to_rfc3339();

@@ -30,7 +30,7 @@ RUN pnpm install --no-frozen-lockfile && pnpm build
 FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libssl3 chromium fonts-noto-cjk fonts-liberation wget \
+    ca-certificates libssl3 chromium fonts-noto-cjk fonts-liberation wget iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CHROME_PATH=/usr/bin/chromium

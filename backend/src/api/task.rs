@@ -6,7 +6,7 @@ use axum::Json;
 use axum::Router;
 use serde::Deserialize;
 
-use crate::models::task::{CreateTaskRequest, CreateTaskResponse, DownloadResult, TestTask, VideoResult, WebsiteResult};
+use crate::models::task::{CreateTaskRequest, CreateTaskResponse, DownloadResult, PingResult, TestTask, VideoResult, WebsiteResult};
 use crate::services::auth_service::Claims;
 use crate::services::task_service::TaskService;
 use crate::storage::StorageManager;
@@ -21,6 +21,7 @@ pub fn task_routes() -> Router<AppState> {
         .route("/:id/result", get(get_task_results))
         .route("/:id/video-result", get(get_video_results))
         .route("/:id/download-result", get(get_download_results))
+        .route("/:id/ping-result", get(get_ping_results))
         .route("/:id/export", get(export_result))
         .route("/:id/cancel", post(cancel_task))
         .route("/:id/retry", post(retry_task))
@@ -124,6 +125,18 @@ async fn get_download_results(
     Path(task_id): Path<String>,
 ) -> Result<Json<crate::utils::response::ApiResponse<Vec<DownloadResult>>>, AppError> {
     let results = TaskService::get_download_results(&state.db, &task_id)
+        .await
+        .map_err(|e| AppError::internal(&e.to_string()))?;
+    Ok(Json(ok(results)))
+}
+
+/// 获取 Ping 测试结果
+async fn get_ping_results(
+    State(state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Path(task_id): Path<String>,
+) -> Result<Json<crate::utils::response::ApiResponse<Vec<PingResult>>>, AppError> {
+    let results = TaskService::get_ping_results(&state.db, &task_id)
         .await
         .map_err(|e| AppError::internal(&e.to_string()))?;
     Ok(Json(ok(results)))

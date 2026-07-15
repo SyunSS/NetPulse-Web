@@ -84,6 +84,18 @@ export interface DownloadResult {
   created_at: string
 }
 
+export interface PingResult {
+  id: string
+  task_id: string
+  host: string
+  avg_latency_ms: number | null
+  packet_loss_rate: number | null
+  jitter_ms: number | null
+  success: number | null
+  error_msg: string | null
+  created_at: string
+}
+
 export interface TaskListResponse {
   tasks: TestTask[]
   total: number
@@ -144,6 +156,12 @@ export const taskApi = {
   getDownloadResults(taskId: string) {
     return http.get<unknown, { code: number; msg: string; data: DownloadResult[] }>(
       `/task/${taskId}/download-result`,
+    )
+  },
+
+  getPingResults(taskId: string) {
+    return http.get<unknown, { code: number; msg: string; data: PingResult[] }>(
+      `/task/${taskId}/ping-result`,
     )
   },
 

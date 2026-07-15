@@ -195,12 +195,27 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE
         );
         "#,
+        // ping_result 表
+        r#"
+        CREATE TABLE IF NOT EXISTS ping_result (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            host TEXT NOT NULL,
+            avg_latency_ms REAL,
+            packet_loss_rate REAL,
+            jitter_ms REAL,
+            success INTEGER DEFAULT 1,
+            error_msg TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES test_task(id)
+        );
+        "#,
     ];
 
     for sql in migrations {
         sqlx::query(sql).execute(pool).await?;
     }
 
-    info!("数据库迁移完成（{} 张表）", 10);
+    info!("数据库迁移完成（{} 张表）", 11);
     Ok(())
 }

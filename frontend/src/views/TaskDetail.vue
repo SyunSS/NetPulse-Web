@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
-import { taskApi, type TestTask, type WebsiteResult, type VideoResult, type DownloadResult } from '@/api/task'
+import { taskApi, type TestTask, type WebsiteResult, type VideoResult, type DownloadResult, type PingResult } from '@/api/task'
 import { getWsClient, type ProgressMessage } from '@/api/ws'
 import { useAuthStore } from '@/stores/auth'
 import { formatMs, formatFileSize, formatTime } from '@/utils'
@@ -17,6 +17,7 @@ const task = ref<TestTask | null>(null)
 const websiteResults = ref<WebsiteResult[]>([])
 const videoResults = ref<VideoResult[]>([])
 const downloadResults = ref<DownloadResult[]>([])
+const pingResults = ref<PingResult[]>([])
 const loading = ref(true)
 const progress = ref(0)
 const logs = ref<string[]>([])
@@ -26,6 +27,7 @@ let unsubWs: (() => void) | null = null
 
 const isVideoTask = computed(() => task.value?.task_type === 'video')
 const isDownloadTask = computed(() => task.value?.task_type === 'download')
+const isPingTask = computed(() => task.value?.task_type === 'ping')
 
 async function fetchData() {
   loading.value = true
@@ -38,6 +40,8 @@ async function fetchData() {
       videoResults.value = (await taskApi.getVideoResults(taskId)).data
     } else if (isDownloadTask.value) {
       downloadResults.value = (await taskApi.getDownloadResults(taskId)).data
+    } else if (isPingTask.value) {
+      pingResults.value = (await taskApi.getPingResults(taskId)).data
     } else {
       websiteResults.value = (await taskApi.getResults(taskId)).data
     }
@@ -110,7 +114,7 @@ const stClass = (s: string) => `st st-${s}`
       <div class="card-title">📋 任务信息</div>
       <div class="info-grid">
         <div class="info-item"><span class="il">任务ID</span><code>{{ task.id.substring(0,8) }}...</code></div>
-        <div class="info-item"><span class="il">类型</span>{{ task.task_type === 'website' ? '网站测试' : task.task_type === 'video' ? '视频测试' : '下载测试' }}</div>
+        <div class="info-item"><span class="il">类型</span>{{ task.task_type === 'website' ? '网站测试' : task.task_type === 'video' ? '视频测试' : task.task_type === 'download' ? '下载测试' : task.task_type === 'ping' ? 'Ping 测试' : task.task_type }}</div>
         <div class="info-item"><span class="il">状态</span><span :class="stClass(task.status)">{{ st(task.status) }}</span></div>
         <div class="info-item"><span class="il">创建</span>{{ formatTime(task.created_at) }}</div>
         <div class="info-item"><span class="il">开始</span>{{ task.started_at ? formatTime(task.started_at) : '-' }}</div>
@@ -203,8 +207,29 @@ const stClass = (s: string) => `st st-${s}`
       </div>
     </div>
 
+    <!-- Ping 测试结果 -->
+    <div v-if="isPingTask && pingResults.length" class="card">
+      <div class="card-title">📡 Ping 测试结果 ({{ pingResults.length }} 条)</div>
+      <div class="table-wrap">
+        <table class="dt">
+          <thead><tr>
+            <th>目标</th><th>平均时延(ms)</th><th>丢包率(%)</th><th>抖动(ms)</th><th>状态</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="r in pingResults" :key="r.id">
+              <td class="url-cell">{{ r.host }}</td>
+              <td>{{ r.avg_latency_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.packet_loss_rate?.toFixed(1) ?? '-' }}%</td>
+              <td>{{ r.jitter_ms?.toFixed(1) ?? '-' }}</td>
+              <td><span :class="r.success===1 ? 'badge ok' : 'badge err'">{{ r.success===1 ? '成功' : '失败' }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- 空状态 -->
-    <div v-if="!loading && ((!isVideoTask&&!isDownloadTask&&!websiteResults.length)||(isVideoTask&&!videoResults.length)||(isDownloadTask&&!downloadResults.length)) && task?.status==='completed'" class="card empty">
+    <div v-if="!loading && ((!isVideoTask&&!isDownloadTask&&!isPingTask&&!websiteResults.length)||(isVideoTask&&!videoResults.length)||(isDownloadTask&&!downloadResults.length)||(isPingTask&&!pingResults.length)) && task?.status==='completed'" class="card empty">
       <div class="empty-icon">📭</div><h3>暂无测试结果</h3><p>任务已完成但未返回数据</p>
     </div>
   </div>

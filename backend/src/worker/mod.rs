@@ -13,8 +13,9 @@ use crate::engines::browser::BrowserEngine;
 use crate::engines::dns::DnsEngine;
 use crate::engines::download::DownloadEngine;
 use crate::engines::http::HttpEngine;
+use crate::engines::ping::PingEngine;
 use crate::engines::video::VideoEngine;
-use crate::models::task::{DownloadResult, VideoResult, WebsiteResult};
+use crate::models::task::{DownloadResult, PingResult, VideoResult, WebsiteResult};
 use crate::storage::StorageManager;
 use crate::utils::response::{ProgressMessage, TaskJob};
 
@@ -74,6 +75,15 @@ impl TaskWorker {
                     tokio::spawn(async move {
                         if let Err(e) = run_download_task(db, config, progress_tx, job).await {
                             error!("下载任务执行异常: {}", e);
+                        }
+                    });
+                } else if job.task_type == "ping" {
+                    let db = self.db.clone();
+                    let config = self.config.clone();
+                    let progress_tx = self.progress_tx.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = run_ping_task(db, config, progress_tx, job).await {
+                            error!("Ping 任务执行异常: {}", e);
                         }
                     });
                 } else {
@@ -667,6 +677,73 @@ async fn save_download_result(db: &SqlitePool, result: &DownloadResult) -> anyho
     .bind(result.download_speed).bind(result.avg_speed).bind(result.peak_speed)
     .bind(result.download_time_ms).bind(result.file_size).bind(result.success)
     .bind(&result.error_msg).bind(&result.created_at)
+    .execute(db).await?;
+    Ok(())
+}
+
+// ===== Ping 任务 =====
+
+async fn run_ping_task(
+    db: SqlitePool,
+    config: Arc<AppConfig>,
+    progress_tx: broadcast::Sender<ProgressMessage>,
+    job: TaskJob,
+) -> anyhow::Result<()> {
+    let task_id = &job.task_id;
+    let total = job.urls.len();
+    let timeout = Duration::from_secs(config.task.timeout_seconds);
+
+    update_task_status(&db, task_id, "running", None).await?;
+    let _ = progress_tx.send(ProgressMessage::TaskStarted { task_id: task_id.clone(), total_urls: total });
+    log_progress(&progress_tx, task_id, "info", &format!("开始 Ping 测试 {} 个目标", total));
+
+    let mut success_count = 0usize;
+    let mut fail_count = 0usize;
+
+    for (i, host) in job.urls.iter().enumerate() {
+        let _ = progress_tx.send(ProgressMessage::UrlTesting {
+            task_id: task_id.clone(), url: host.clone(), current: i + 1, total,
+        });
+
+        let engine = PingEngine::new(timeout);
+        let result = engine.test_ping(host).await;
+
+        let now = Utc::now().to_rfc3339();
+        let pr = PingResult {
+            id: Uuid::new_v4().to_string(),
+            task_id: task_id.clone(),
+            host: result.host,
+            avg_latency_ms: Some(result.avg_latency_ms),
+            packet_loss_rate: Some(result.packet_loss_rate),
+            jitter_ms: Some(result.jitter_ms),
+            success: Some(if result.success { 1 } else { 0 }),
+            error_msg: result.error,
+            created_at: now,
+        };
+
+        save_ping_result(&db, &pr).await?;
+
+        if result.success { success_count += 1; } else { fail_count += 1; }
+
+        let progress = ((i + 1) as f64 / total as f64) * 100.0;
+        let _ = progress_tx.send(ProgressMessage::ProgressUpdate { task_id: task_id.clone(), progress });
+        update_task_progress(&db, task_id, progress).await.ok();
+    }
+
+    let _ = progress_tx.send(ProgressMessage::TaskCompleted {
+        task_id: task_id.clone(), success_count, fail_count,
+    });
+    update_task_status(&db, task_id, "completed", None).await?;
+    Ok(())
+}
+
+async fn save_ping_result(db: &SqlitePool, result: &PingResult) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO ping_result (id, task_id, host, avg_latency_ms, packet_loss_rate, jitter_ms, success, error_msg, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&result.id).bind(&result.task_id).bind(&result.host)
+    .bind(result.avg_latency_ms).bind(result.packet_loss_rate).bind(result.jitter_ms)
+    .bind(result.success).bind(&result.error_msg).bind(&result.created_at)
     .execute(db).await?;
     Ok(())
 }

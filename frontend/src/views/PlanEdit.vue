@@ -85,6 +85,7 @@ const taskTypeOptions = [
   { value: 'website', label: '网站测试', color: 'var(--color-primary)' },
   { value: 'video', label: '视频测试', color: 'var(--color-warning)' },
   { value: 'download', label: '下载测试', color: 'var(--color-success)' },
+  { value: 'ping', label: 'Ping 测试', color: 'var(--color-info)' },
 ]
 
 const cronPresets = [

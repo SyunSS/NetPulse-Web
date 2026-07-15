@@ -16,6 +16,7 @@ const taskTypeLabel = (t: string) => {
     website: '网站测试',
     video: '视频测试',
     download: '下载测试',
+    ping: 'Ping 测试',
   }
   return map[t] || t
 }
@@ -25,6 +26,7 @@ const taskTypeColor = (t: string) => {
     website: 'var(--color-primary)',
     video: 'var(--color-warning)',
     download: 'var(--color-success)',
+    ping: 'var(--color-info)',
   }
   return map[t] || 'var(--text-secondary)'
 }

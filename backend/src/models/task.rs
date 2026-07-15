@@ -149,3 +149,17 @@ pub struct TaskLog {
     pub message: String,
     pub created_at: String,
 }
+
+/// Ping 测试结果模型
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct PingResult {
+    pub id: String,
+    pub task_id: String,
+    pub host: String,
+    pub avg_latency_ms: Option<f64>,
+    pub packet_loss_rate: Option<f64>,
+    pub jitter_ms: Option<f64>,
+    pub success: Option<i32>,
+    pub error_msg: Option<String>,
+    pub created_at: String,
+}
