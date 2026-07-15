@@ -61,12 +61,14 @@ export interface PlanListResponse {
 export interface TaskPlanRun {
   id: string
   plan_id: string
-  task_id: string | null
+  task_ids: string
   triggered_by: string
   started_at: string
   finished_at: string | null
   status: string
   created_at: string
+  task_count: number
+  completed_count: number
 }
 
 export interface RunPlanResponse {
