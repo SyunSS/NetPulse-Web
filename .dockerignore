@@ -6,15 +6,13 @@ backend/data/
 frontend/node_modules/
 frontend/dist/
 
-# Docker
-.docker/
+# Git
+.git/
+.github/
 
 # IDE
-.vscode/
 .idea/
+.vscode/
 
 # OS
 .DS_Store
-
-# Git
-.git/

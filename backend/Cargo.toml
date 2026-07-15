@@ -8,7 +8,7 @@ description = "NetPulse Web - 网络质量测试平台"
 # Web 框架
 axum = { version = "0.7", features = ["macros", "ws"] }
 tower = "0.4"
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
 
 # 异步运行时
 tokio = { version = "1", features = ["full"] }

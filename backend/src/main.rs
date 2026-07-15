@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use tokio::sync::{broadcast, mpsc};
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::{ServeDir, ServeFile};
 use tracing::info;
 
 use crate::config::AppConfig;
@@ -67,6 +68,16 @@ async fn main() -> anyhow::Result<()> {
     // 构建应用路由
     let app = api::build_router(state)
         .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any));
+
+    // 生产模式：服务前端静态文件
+    let app = if std::path::Path::new("frontend-dist").exists() {
+        info!("前端静态文件模式已启用 (frontend-dist/)");
+        app.fallback_service(
+            ServeDir::new("frontend-dist").fallback(ServeFile::new("frontend-dist/index.html")),
+        )
+    } else {
+        app
+    };
 
     // 启动服务器
     let addr: SocketAddr = config.server_addr().parse()?;
