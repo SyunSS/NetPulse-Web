@@ -45,10 +45,14 @@ export const usePlanStore = defineStore('plan', () => {
     return res.data
   }
 
-  async function fetchPlanRuns(planId: string) {
-    const res = await planApi.runs(planId)
+  async function fetchPlanRuns(planId: string, params?: { start?: string; end?: string }) {
+    const res = await planApi.runs(planId, params)
     planRuns.value = res.data
     return res.data
+  }
+
+  async function deleteRun(planId: string, runId: string) {
+    await planApi.deleteRun(planId, runId)
   }
 
   return {
@@ -64,5 +68,6 @@ export const usePlanStore = defineStore('plan', () => {
     deletePlan,
     runPlan,
     fetchPlanRuns,
+    deleteRun,
   }
 })

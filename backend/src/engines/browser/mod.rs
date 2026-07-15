@@ -172,8 +172,8 @@ fn test_page_blocking(chrome_path: &str, headless: bool, url: &str, _timeout: Du
 
     let nav_elapsed = nav_start.elapsed().as_secs_f64() * 1000.0;
 
-    // 等待 3 秒让所有资源加载完成
-    std::thread::sleep(Duration::from_secs(3));
+    // PERF_JS 内部等待 readyState + 8s 超时，这里再等 1s 兜底
+    std::thread::sleep(Duration::from_secs(1));
 
     // 注入 JS 采集 Performance API 数据
     let perf_data: PerfData = match tab.evaluate(PERF_JS, true) {
@@ -266,44 +266,59 @@ struct PerfData {
 
 /// 注入的 JS 脚本，采集 Performance API 数据
 const PERF_JS: &str = r#"
-(() => {
+(async () => {
+    // 等待页面完全加载（最多 8 秒）
+    const waitForLoad = () => new Promise(resolve => {
+        if (document.readyState === 'complete') return resolve();
+        const timer = setTimeout(() => resolve(), 8000);
+        window.addEventListener('load', () => { clearTimeout(timer); resolve(); }, { once: true });
+    });
+    await waitForLoad();
+
+    // 再等 1.5 秒让所有 XHR/fetch 完成
+    await new Promise(r => setTimeout(r, 1500));
+
+    // 用 PerformanceObserver 收集所有资源条目（包括 lazy-loaded）
+    const allEntries = performance.getEntriesByType('resource');
+    let resourceTotalSize = 0;
+    let videoSize = 0;
+    let countWithSize = 0;
+    for (const entry of allEntries) {
+        const size = entry.transferSize || entry.encodedBodySize || entry.decodedBodySize || 0;
+        resourceTotalSize += size;
+        // 视频/HLS 资源单独统计
+        if (entry.initiatorType === 'video' || entry.name.match(/\.(mp4|m3u8|ts|m4s|webm|flv)/)) {
+            videoSize += size;
+        }
+        if (size > 0) countWithSize++;
+    }
+
+    // 加上 navigation entry 自身
     const navEntries = performance.getEntriesByType('navigation');
-    let domContentLoaded = null;
-    let loadEventEnd = null;
+    let navSize = 0, firstPaint = null, firstContentfulPaint = null, domContentLoaded = null, loadEventEnd = null;
     if (navEntries.length > 0) {
         const nav = navEntries[0];
+        navSize = nav.transferSize || nav.encodedBodySize || 0;
         domContentLoaded = nav.domContentLoadedEventEnd;
         loadEventEnd = nav.loadEventEnd;
     }
 
+    // Paint Timing
     const paintEntries = performance.getEntriesByType('paint');
-    let firstPaint = null;
-    let firstContentfulPaint = null;
     for (const entry of paintEntries) {
-        if (entry.name === 'first-paint') firstPaint = entry.startTime;
-        if (entry.name === 'first-contentful-paint') firstContentfulPaint = entry.startTime;
+        if (entry.name === 'first-paint' && firstPaint === null) firstPaint = entry.startTime;
+        if (entry.name === 'first-contentful-paint' && firstContentfulPaint === null) firstContentfulPaint = entry.startTime;
     }
-
-    const resourceEntries = performance.getEntriesByType('resource');
-    let resourceTotalSize = 0;
-    for (const entry of resourceEntries) {
-        // transferSize 经常为 0（缓存 / 跨域），用 encodedBodySize 兜底
-        const size = entry.transferSize || entry.encodedBodySize || entry.decodedBodySize || 0;
-        resourceTotalSize += size;
-    }
-
-    // 也统计 navigation entry（HTML 文档本身）
-    const navSize = navEntries.length > 0
-        ? (navEntries[0].transferSize || navEntries[0].encodedBodySize || 0)
-        : 0;
 
     return {
         firstPaint: firstPaint,
         firstContentfulPaint: firstContentfulPaint,
         domContentLoaded: domContentLoaded,
         loadEventEnd: loadEventEnd,
-        resourceCount: resourceEntries.length,
-        resourceTotalSize: resourceTotalSize + navSize
+        resourceCount: allEntries.length,
+        resourceTotalSize: resourceTotalSize + navSize,
+        videoSize: videoSize,
+        countWithSize: countWithSize
     };
 })()
 "#;

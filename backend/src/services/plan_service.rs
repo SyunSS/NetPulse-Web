@@ -398,6 +398,76 @@ impl PlanService {
         Ok(())
     }
 
+    /// 删除 plan_run（不删除关联的 task，task 仍可查看）
+    pub async fn delete_plan_run(
+        db: &SqlitePool,
+        user_id: &str,
+        plan_id: &str,
+        run_id: &str,
+    ) -> anyhow::Result<()> {
+        // 校验权限
+        let plan = sqlx::query_as::<_, TaskPlan>("SELECT * FROM task_plans WHERE id = ?")
+            .bind(plan_id)
+            .fetch_optional(db)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("计划不存在"))?;
+        if plan.user_id != user_id {
+            anyhow::bail!("无权删除");
+        }
+        sqlx::query("DELETE FROM task_plan_runs WHERE id = ? AND plan_id = ?")
+            .bind(run_id)
+            .bind(plan_id)
+            .execute(db)
+            .await?;
+        Ok(())
+    }
+
+    /// 按时间范围筛选 plan_run
+    pub async fn list_plan_runs_filtered(
+        db: &SqlitePool,
+        plan_id: &str,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
+        limit: u32,
+    ) -> anyhow::Result<Vec<PlanRunWithTasks>> {
+        let mut sql = String::from(
+            "SELECT * FROM task_plan_runs WHERE plan_id = ?"
+        );
+        if start_time.is_some() { sql.push_str(" AND started_at >= ?"); }
+        if end_time.is_some() { sql.push_str(" AND started_at <= ?"); }
+        sql.push_str(" ORDER BY started_at DESC LIMIT ?");
+
+        let mut q = sqlx::query_as::<_, TaskPlanRun>(&sql).bind(plan_id);
+        if let Some(s) = start_time { q = q.bind(s); }
+        if let Some(e) = end_time { q = q.bind(e); }
+        q = q.bind(limit);
+
+        let runs = q.fetch_all(db).await?;
+        let mut results = Vec::new();
+        for run in runs {
+            let task_ids: Vec<String> = serde_json::from_str(&run.task_ids).unwrap_or_default();
+            let task_count = task_ids.len();
+            let completed_count = if task_count > 0 {
+                let placeholders: Vec<String> = task_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+                let query = format!(
+                    "SELECT COUNT(*) FROM test_task WHERE id IN ({}) AND status IN ('completed', 'failed', 'cancelled')",
+                    placeholders.join(",")
+                );
+                let mut q = sqlx::query_scalar(&query);
+                for tid in &task_ids { q = q.bind(tid); }
+                q.fetch_one(db).await.unwrap_or(0)
+            } else {
+                0
+            } as usize;
+
+            if completed_count == task_count && task_count > 0 && run.status == "running" {
+                let _ = Self::complete_plan_run(db, &run.id, "completed").await;
+            }
+            results.push(PlanRunWithTasks { run, task_count, completed_count });
+        }
+        Ok(results)
+    }
+
     /// 更新下次执行时间
     pub async fn update_next_run(
         db: &SqlitePool,

@@ -22,6 +22,7 @@ pub fn plan_routes() -> Router<AppState> {
         .route("/:id/delete", post(delete_plan))
         .route("/:id/run", post(run_plan))
         .route("/:id/runs", get(list_plan_runs))
+        .route("/:id/run/:run_id/delete", post(delete_plan_run))
         .route("/:id/run/:run_id/export", get(export_plan_run))
 }
 
@@ -136,22 +137,43 @@ async fn run_plan(
     Ok(Json(ok_with_msg("计划已派发", resp)))
 }
 
-/// 列出计划运行历史
+/// 列出计划运行历史（支持时间筛选）
 async fn list_plan_runs(
     State(state): State<AppState>,
     Extension(_claims): Extension<Claims>,
     Path(plan_id): Path<String>,
     Query(q): Query<RunListQuery>,
 ) -> Result<Json<crate::utils::response::ApiResponse<Vec<PlanRunWithTasks>>>, AppError> {
-    let runs = PlanService::list_plan_runs(&state.db, &plan_id, q.limit.unwrap_or(20))
-        .await
-        .map_err(|e| AppError::internal(&e.to_string()))?;
+    let runs = PlanService::list_plan_runs_filtered(
+        &state.db, &plan_id,
+        q.start.as_deref(),
+        q.end.as_deref(),
+        q.limit.unwrap_or(50),
+    )
+    .await
+    .map_err(|e| AppError::internal(&e.to_string()))?;
     Ok(Json(ok(runs)))
+}
+
+/// 删除一条计划运行记录
+async fn delete_plan_run(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path((plan_id, run_id)): Path<(String, String)>,
+) -> Result<Json<crate::utils::response::ApiResponse<()>>, AppError> {
+    PlanService::delete_plan_run(&state.db, &claims.sub, &plan_id, &run_id)
+        .await
+        .map_err(|e| AppError::bad_request(&e.to_string()))?;
+    Ok(Json(ok_with_msg("运行记录已删除", ())))
 }
 
 #[derive(Debug, Deserialize)]
 struct RunListQuery {
     limit: Option<u32>,
+    /// 起始时间（ISO 8601），包含
+    start: Option<String>,
+    /// 结束时间（ISO 8601），包含
+    end: Option<String>,
 }
 
 /// 导出计划运行的全部 task 结果（合并到 1 个文件）

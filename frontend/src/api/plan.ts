@@ -116,10 +116,16 @@ export const planApi = {
     )
   },
 
-  runs(planId: string, limit = 20) {
+  runs(planId: string, params?: { start?: string; end?: string; limit?: number }) {
     return http.get<unknown, { code: number; msg: string; data: TaskPlanRun[] }>(
       `/plan/${planId}/runs`,
-      { params: { limit } },
+      { params: { limit: 50, ...params } },
+    )
+  },
+
+  deleteRun(planId: string, runId: string) {
+    return http.post<unknown, { code: number; msg: string; data: null }>(
+      `/plan/${planId}/run/${runId}/delete`,
     )
   },
 }
