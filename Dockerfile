@@ -33,7 +33,7 @@ RUN pnpm install --no-frozen-lockfile && pnpm build
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libssl3 chromium fonts-noto-cjk fonts-liberation \
+    ca-certificates libssl3 chromium fonts-noto-cjk fonts-liberation wget \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CHROME_PATH=/usr/bin/chromium
