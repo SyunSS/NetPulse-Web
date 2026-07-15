@@ -23,8 +23,12 @@ RUN cargo build --release
 FROM node:22-slim AS frontend-builder
 
 WORKDIR /build
+
+RUN npm install -g pnpm
+
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN corepack enable && pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+RUN pnpm install --no-frozen-lockfile
+
 COPY frontend/ ./
 RUN pnpm build
 
