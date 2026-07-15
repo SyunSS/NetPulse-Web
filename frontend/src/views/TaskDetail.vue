@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, h, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { taskApi, type TestTask, type WebsiteResult, type VideoResult, type DownloadResult } from '@/api/task'
@@ -35,18 +35,14 @@ async function fetchData() {
     progress.value = task.value.progress ?? 0
 
     if (isVideoTask.value) {
-      const resultRes = await taskApi.getVideoResults(taskId)
-      videoResults.value = resultRes.data
+      videoResults.value = (await taskApi.getVideoResults(taskId)).data
     } else if (isDownloadTask.value) {
-      const resultRes = await taskApi.getDownloadResults(taskId)
-      downloadResults.value = resultRes.data
+      downloadResults.value = (await taskApi.getDownloadResults(taskId)).data
     } else {
-      const resultRes = await taskApi.getResults(taskId)
-      websiteResults.value = resultRes.data
+      websiteResults.value = (await taskApi.getResults(taskId)).data
     }
   } catch (e: unknown) {
-    const err = e as Error
-    message.error(err.message || '加载失败')
+    message.error((e as Error).message || '加载失败')
   } finally {
     loading.value = false
   }
@@ -54,39 +50,9 @@ async function fetchData() {
 
 function handleWsMessage(msg: ProgressMessage) {
   if (msg.task_id !== taskId) return
-  switch (msg.type) {
-    case 'progress_update':
-      progress.value = msg.progress
-      break
-    case 'log':
-      logs.value.push(msg.message)
-      break
-    case 'url_completed':
-    case 'task_completed':
-    case 'task_failed':
-      fetchData()
-      break
-  }
-}
-
-async function handleCancel() {
-  try {
-    await taskApi.cancel(taskId)
-    message.success('任务已取消')
-    fetchData()
-  } catch (e: unknown) {
-    message.error((e as Error).message)
-  }
-}
-
-async function handleRetry() {
-  try {
-    const res = await taskApi.retry(taskId)
-    message.success('任务已重新创建')
-    router.push(`/task/${res.data.task_id}`)
-  } catch (e: unknown) {
-    message.error((e as Error).message)
-  }
+  if (msg.type === 'progress_update') progress.value = msg.progress
+  if (msg.type === 'log') logs.value.push(msg.message)
+  if (['url_completed','task_completed','task_failed'].includes(msg.type)) fetchData()
 }
 
 async function handleExport(format: string) {
@@ -96,17 +62,14 @@ async function handleExport(format: string) {
     })
     if (!resp.ok) throw new Error('导出失败')
     const blob = await resp.blob()
-    const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url
+    a.href = URL.createObjectURL(blob)
     const ext = format === 'xlsx' ? 'xlsx' : format === 'csv' ? 'csv' : 'json'
     a.download = `result_${taskId.substring(0, 8)}.${ext}`
     a.click()
-    URL.revokeObjectURL(url)
+    URL.revokeObjectURL(a.href)
     message.success('导出成功')
-  } catch (e: any) {
-    message.error(e.message || '导出失败')
-  }
+  } catch (e: any) { message.error(e.message || '导出失败') }
 }
 
 onMounted(() => {
@@ -115,9 +78,10 @@ onMounted(() => {
   unsubWs = ws.onMessage(handleWsMessage)
 })
 
-onUnmounted(() => {
-  if (unsubWs) unsubWs()
-})
+onUnmounted(() => { if (unsubWs) unsubWs() })
+
+const st = (s: string) => s === 'completed' ? '已完成' : s === 'running' ? '运行中' : s === 'failed' ? '失败' : s === 'pending' ? '等待' : s
+const stClass = (s: string) => `st st-${s}`
 </script>
 
 <template>
@@ -128,17 +92,9 @@ onUnmounted(() => {
         <h1 class="page-title">任务详情</h1>
       </div>
       <div class="header-actions">
-        <button
-          v-if="task && (task.status === 'pending' || task.status === 'running')"
-          class="btn warning"
-          @click="handleCancel"
-        >取消任务</button>
-        <button
-          v-if="task && ['completed', 'failed', 'cancelled'].includes(task.status)"
-          class="btn primary"
-          @click="handleRetry"
-        >重新测试</button>
-        <div v-if="task && task.status === 'completed'" style="display:flex;gap:6px">
+        <button v-if="task && (task.status==='pending'||task.status==='running')" class="btn warning" @click="taskApi.cancel(taskId).then(fetchData)">取消任务</button>
+        <button v-if="task && ['completed','failed','cancelled'].includes(task.status)" class="btn primary" @click="taskApi.retry(taskId).then(r=>router.push('/task/'+r.data.task_id))">重新测试</button>
+        <div v-if="task?.status==='completed'" style="display:flex;gap:6px">
           <button class="btn" @click="handleExport('xlsx')">📥 Excel</button>
           <button class="btn" @click="handleExport('csv')">📥 CSV</button>
           <button class="btn" @click="handleExport('json')">📥 JSON</button>
@@ -146,135 +102,163 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <n-spin :show="loading">
-      <!-- 任务信息 -->
-      <n-card v-if="task" title="任务信息" class="info-card">
-        <n-descriptions :column="3" bordered size="small">
-          <n-descriptions-item label="任务ID">{{ task.id.substring(0, 8) }}...</n-descriptions-item>
-          <n-descriptions-item label="类型">{{ task.task_type }}</n-descriptions-item>
-          <n-descriptions-item label="状态">
-            <span :class="`status-tag status-${task.status}`">{{ task.status }}</span>
-          </n-descriptions-item>
-          <n-descriptions-item label="创建时间">{{ formatTime(task.created_at) }}</n-descriptions-item>
-          <n-descriptions-item label="开始时间">{{ task.started_at ? formatTime(task.started_at) : '-' }}</n-descriptions-item>
-          <n-descriptions-item label="完成时间">{{ task.finished_at ? formatTime(task.finished_at) : '-' }}</n-descriptions-item>
-        </n-descriptions>
-        <div v-if="task.status === 'running' || task.status === 'pending'" class="progress-section">
-          <n-progress type="line" :percentage="progress" :status="task.status === 'running' ? 'info' : 'default'" />
-        </div>
-      </n-card>
+    <!-- 加载中 -->
+    <div v-if="loading" class="loading-box">⏳ 加载中...</div>
 
-      <!-- 实时日志 -->
-      <n-card v-if="logs.length > 0" title="实时日志" class="logs-card">
-        <div class="logs-container">
-          <div v-for="(log, i) in logs" :key="i" class="log-line">{{ log }}</div>
-        </div>
-      </n-card>
+    <!-- 任务信息 -->
+    <div v-if="task" class="info-card">
+      <div class="card-title">📋 任务信息</div>
+      <div class="info-grid">
+        <div class="info-item"><span class="il">任务ID</span><code>{{ task.id.substring(0,8) }}...</code></div>
+        <div class="info-item"><span class="il">类型</span>{{ task.task_type === 'website' ? '网站测试' : task.task_type === 'video' ? '视频测试' : '下载测试' }}</div>
+        <div class="info-item"><span class="il">状态</span><span :class="stClass(task.status)">{{ st(task.status) }}</span></div>
+        <div class="info-item"><span class="il">创建</span>{{ formatTime(task.created_at) }}</div>
+        <div class="info-item"><span class="il">开始</span>{{ task.started_at ? formatTime(task.started_at) : '-' }}</div>
+        <div class="info-item"><span class="il">完成</span>{{ task.finished_at ? formatTime(task.finished_at) : '-' }}</div>
+      </div>
+      <div v-if="task.status==='running'||task.status==='pending'" class="progress-bar">
+        <div class="progress-fill" :style="{width:progress+'%'}"></div>
+        <span class="progress-text">{{ progress.toFixed(0) }}%</span>
+      </div>
+    </div>
 
-      <!-- 网站测试结果 -->
-      <n-card v-if="!isVideoTask && websiteResults.length > 0" title="网站测试结果" class="results-card">
-        <n-data-table
-          :columns="[
-            { title: 'URL', key: 'url', width: 200, ellipsis: { tooltip: true } },
-            { title: 'DNS(ms)', key: 'dns_time_ms', render: (r: WebsiteResult) => r.dns_time_ms?.toFixed(1) ?? '-' },
-            { title: 'TCP(ms)', key: 'tcp_time_ms', render: (r: WebsiteResult) => r.tcp_time_ms?.toFixed(1) ?? '-' },
-            { title: 'TLS(ms)', key: 'tls_time_ms', render: (r: WebsiteResult) => r.tls_time_ms?.toFixed(1) ?? '-' },
-            { title: 'HTTP', key: 'http_status', render: (r: WebsiteResult) => r.http_status ?? '-' },
-            { title: 'TTFB(ms)', key: 'ttfb_ms', render: (r: WebsiteResult) => r.ttfb_ms?.toFixed(1) ?? '-' },
-            { title: '打开时间(ms)', key: 'page_open_time_ms', render: (r: WebsiteResult) => r.page_open_time_ms?.toFixed(0) ?? '-' },
-            { title: '资源数', key: 'resource_count', render: (r: WebsiteResult) => r.resource_count ?? '-' },
-            { title: '资源大小', key: 'resource_total_size', render: (r: WebsiteResult) => r.resource_total_size ? formatFileSize(r.resource_total_size) : '-' },
-            { title: '状态', key: 'error_msg', render: (r: WebsiteResult) => r.error_msg ? h('span', { style: 'color: #d03050' }, '失败') : h('span', { style: 'color: #18a058' }, '成功') }
-          ]"
-          :data="websiteResults"
-          :bordered="true"
-          size="small"
-          :scroll-x="1000"
-        />
-      </n-card>
+    <!-- 实时日志 -->
+    <div v-if="logs.length" class="card">
+      <div class="card-title">📝 实时日志</div>
+      <div class="log-box"><div v-for="(l,i) in logs" :key="i" class="log-line">{{ l }}</div></div>
+    </div>
 
-      <!-- 视频测试结果 -->
-      <n-card v-if="isVideoTask && videoResults.length > 0" title="视频测试结果" class="results-card">
-        <n-data-table
-          :columns="[
-            { title: 'URL', key: 'url', width: 200, ellipsis: { tooltip: true } },
-            { title: '平台', key: 'platform', render: (r: VideoResult) => r.platform ?? '-' },
-            { title: '首次播放(ms)', key: 'first_play_time_ms', render: (r: VideoResult) => r.first_play_time_ms?.toFixed(0) ?? '-' },
-            { title: '缓冲次数', key: 'buffer_count', render: (r: VideoResult) => r.buffer_count ?? '-' },
-            { title: '缓冲时间(ms)', key: 'total_buffer_time_ms', render: (r: VideoResult) => r.total_buffer_time_ms?.toFixed(0) ?? '-' },
-            { title: '时长(ms)', key: 'video_duration_ms', render: (r: VideoResult) => r.video_duration_ms?.toFixed(0) ?? '-' },
-            { title: '下载速度(KB/s)', key: 'video_download_speed', render: (r: VideoResult) => r.video_download_speed?.toFixed(1) ?? '-' },
-            { title: '视频大小', key: 'video_size', render: (r: VideoResult) => r.video_size ? formatFileSize(r.video_size) : '-' },
-            { title: '丢帧', key: 'dropped_frames', render: (r: VideoResult) => r.dropped_frames ?? '-' },
-            { title: '解码帧', key: 'decoded_frames', render: (r: VideoResult) => r.decoded_frames ?? '-' },
-            { title: '状态', key: 'play_success', render: (r: VideoResult) => r.play_success === 1 ? h('span', { style: 'color: #18a058' }, '成功') : h('span', { style: 'color: #d03050' }, '失败') }
-          ]"
-          :data="videoResults"
-          :bordered="true"
-          size="small"
-          :scroll-x="1100"
-        />
-      </n-card>
+    <!-- 网站测试结果 -->
+    <div v-if="!isVideoTask && !isDownloadTask && websiteResults.length" class="card">
+      <div class="card-title">🌐 网站测试结果 ({{ websiteResults.length }} 条)</div>
+      <div class="table-wrap">
+        <table class="dt">
+          <thead><tr>
+            <th>URL</th><th>DNS(ms)</th><th>TCP(ms)</th><th>TLS(ms)</th><th>HTTP</th><th>TTFB(ms)</th><th>打开(ms)</th><th>资源数</th><th>标题</th><th>状态</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="r in websiteResults" :key="r.id">
+              <td class="url-cell">{{ r.url }}</td>
+              <td>{{ r.dns_time_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.tcp_time_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.tls_time_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.http_status ?? '-' }}</td>
+              <td>{{ r.ttfb_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.page_open_time_ms?.toFixed(0) ?? '-' }}</td>
+              <td>{{ r.resource_count ?? '-' }}</td>
+              <td class="title-cell">{{ r.page_title || '-' }}</td>
+              <td><span :class="r.error_msg ? 'badge err' : 'badge ok'">{{ r.error_msg ? '失败' : '成功' }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
-      <!-- 下载测试结果 -->
-      <n-card v-if="isDownloadTask && downloadResults.length > 0" title="下载测试结果" class="results-card">
-        <n-data-table
-          :columns="[
-            { title: 'URL', key: 'url', width: 250, ellipsis: { tooltip: true } },
-            { title: '下载速度(KB/s)', key: 'download_speed', render: (r: DownloadResult) => r.download_speed?.toFixed(1) ?? '-' },
-            { title: '平均速度(KB/s)', key: 'avg_speed', render: (r: DownloadResult) => r.avg_speed?.toFixed(1) ?? '-' },
-            { title: '峰值速度(KB/s)', key: 'peak_speed', render: (r: DownloadResult) => r.peak_speed?.toFixed(1) ?? '-' },
-            { title: '下载时间(ms)', key: 'download_time_ms', render: (r: DownloadResult) => r.download_time_ms?.toFixed(0) ?? '-' },
-            { title: '文件大小', key: 'file_size', render: (r: DownloadResult) => r.file_size ? formatFileSize(r.file_size) : '-' },
-            { title: '状态', key: 'success', render: (r: DownloadResult) => r.success === 1 ? h('span', { style: 'color: #18a058' }, '成功') : r.error_msg ? h('span', { style: 'color: #d03050' }, r.error_msg) : h('span', { style: 'color: #d03050' }, '失败') }
-          ]"
-          :data="downloadResults"
-          :bordered="true"
-          size="small"
-        />
-      </n-card>
+    <!-- 视频测试结果 -->
+    <div v-if="isVideoTask && videoResults.length" class="card">
+      <div class="card-title">🎬 视频测试结果 ({{ videoResults.length }} 条)</div>
+      <div class="table-wrap">
+        <table class="dt">
+          <thead><tr>
+            <th>URL</th><th>平台</th><th>首播(ms)</th><th>缓冲</th><th>时长(ms)</th><th>下载速度</th><th>大小</th><th>丢帧</th><th>标题</th><th>状态</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="r in videoResults" :key="r.id">
+              <td class="url-cell">{{ r.url }}</td>
+              <td>{{ r.platform || '-' }}</td>
+              <td>{{ r.first_play_time_ms?.toFixed(0) ?? '-' }}</td>
+              <td>{{ r.buffer_count ?? '-' }}</td>
+              <td>{{ r.video_duration_ms?.toFixed(0) ?? '-' }}</td>
+              <td>{{ r.video_download_speed?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.video_size ? formatFileSize(r.video_size) : '-' }}</td>
+              <td>{{ r.dropped_frames ?? '-' }}</td>
+              <td class="title-cell">{{ r.page_title || '-' }}</td>
+              <td><span :class="r.play_success===1 ? 'badge ok' : 'badge err'">{{ r.play_success===1 ? '成功' : '待确认' }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
-      <!-- 空状态 -->
-      <n-card v-if="!loading && ((isVideoTask && videoResults.length === 0) || (isDownloadTask && downloadResults.length === 0) || (!isVideoTask && !isDownloadTask && websiteResults.length === 0)) && task && task.status === 'completed'" class="empty-card">
-        <n-empty description="暂无测试结果" />
-      </n-card>
-    </n-spin>
+    <!-- 下载测试结果 -->
+    <div v-if="isDownloadTask && downloadResults.length" class="card">
+      <div class="card-title">📥 下载测试结果 ({{ downloadResults.length }} 条)</div>
+      <div class="table-wrap">
+        <table class="dt">
+          <thead><tr>
+            <th>URL</th><th>速度(KB/s)</th><th>平均(KB/s)</th><th>峰值(KB/s)</th><th>耗时(ms)</th><th>大小</th><th>状态</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="r in downloadResults" :key="r.id">
+              <td class="url-cell">{{ r.url }}</td>
+              <td>{{ r.download_speed?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.avg_speed?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.peak_speed?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.download_time_ms?.toFixed(0) ?? '-' }}</td>
+              <td>{{ r.file_size ? formatFileSize(r.file_size) : '-' }}</td>
+              <td><span :class="r.success===1 ? 'badge ok' : 'badge err'">{{ r.success===1 ? '成功' : '失败' }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 空状态 -->
+    <div v-if="!loading && ((!isVideoTask&&!isDownloadTask&&!websiteResults.length)||(isVideoTask&&!videoResults.length)||(isDownloadTask&&!downloadResults.length)) && task?.status==='completed'" class="card empty">
+      <div class="empty-icon">📭</div><h3>暂无测试结果</h3><p>任务已完成但未返回数据</p>
+    </div>
   </div>
 </template>
 
-<script lang="ts">
-export default { name: 'TaskDetail' }
-</script>
-
 <style scoped>
-.task-detail { padding: 8px 0; }
-.detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-.page-title { font-size: 24px; font-weight: 600; margin-top: 8px; }
-.header-actions { display: flex; gap: 12px; }
-.info-card, .logs-card, .results-card { margin-bottom: 16px; }
-.progress-section { margin-top: 16px; }
-.logs-container { max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 13px; background: var(--n-color-target); padding: 12px; border-radius: 4px; }
-.log-line { margin-bottom: 4px; color: var(--n-text-color-2); }
-.status-tag { padding: 2px 8px; border-radius: 4px; font-size: 12px; }
-.status-completed { background: #18a058; color: white; }
-.status-running { background: #2080f0; color: white; }
-.status-pending { background: #909399; color: white; }
-.status-failed { background: #d03050; color: white; }
-.status-cancelled { background: #f0a020; color: white; }
+.task-detail { max-width:1200px; margin:0 auto; }
+.detail-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px; }
+.page-title { font-size:22px; font-weight:700; margin:8px 0 0; }
+.header-actions { display:flex; gap:8px; flex-wrap:wrap; }
 
-.back-btn {
-  background: none; border: 1px solid var(--border-color); color: var(--text-secondary);
-  padding: 8px 14px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px;
-}
-.back-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-.btn {
-  height: 34px; padding: 0 14px; border: 1px solid var(--border-color); background: var(--bg-card);
-  color: var(--text-primary); border-radius: var(--radius-sm); font-size: 13px; cursor: pointer;
-  font-weight: 500; transition: all var(--transition-fast);
-}
-.btn:hover { background: var(--bg-hover); border-color: var(--border-color-hover); }
-.btn.primary { background: var(--gradient-primary); color: white; border: none; }
-.btn.primary:hover { box-shadow: var(--shadow-glow); }
-.btn.warning { background: var(--color-warning); color: white; border: none; }
-.btn.warning:hover { opacity: 0.9; }
+.back-btn { background:none; border:1px solid var(--border-color); color:var(--text-secondary); padding:8px 14px; border-radius:var(--radius-sm); cursor:pointer; font-size:13px; }
+.back-btn:hover { background:var(--bg-hover); color:var(--text-primary); }
+.btn { height:34px; padding:0 14px; border:1px solid var(--border-color); background:var(--bg-card); color:var(--text-primary); border-radius:var(--radius-sm); font-size:13px; cursor:pointer; font-weight:500; white-space:nowrap; }
+.btn:hover { background:var(--bg-hover); }
+.btn.primary { background:var(--gradient-primary); color:white; border:none; }
+.btn.primary:hover { box-shadow:var(--shadow-glow); }
+.btn.warning { background:var(--color-warning); color:white; border:none; }
+
+.loading-box { text-align:center; padding:80px 20px; color:var(--text-secondary); font-size:16px; }
+
+.card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-lg); padding:20px; margin-bottom:14px; }
+.card-title { font-size:15px; font-weight:600; margin-bottom:14px; }
+.info-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.info-item { padding:8px 12px; background:var(--bg-body); border-radius:var(--radius-sm); display:flex; align-items:center; gap:8px; font-size:13px; }
+.info-item code { font-size:11px; color:var(--color-primary); font-family:var(--font-mono); }
+.il { color:var(--text-tertiary); min-width:32px; }
+
+.progress-bar { margin-top:14px; height:8px; background:var(--bg-body); border-radius:4px; overflow:hidden; position:relative; }
+.progress-fill { height:100%; background:var(--gradient-primary); border-radius:4px; transition:width .3s; }
+.progress-text { position:absolute; right:0; top:-20px; font-size:12px; color:var(--text-secondary); }
+
+.log-box { max-height:200px; overflow-y:auto; background:var(--bg-body); padding:10px; border-radius:var(--radius-sm); font-family:var(--font-mono); font-size:12px; }
+.log-line { color:var(--text-secondary); margin-bottom:2px; }
+
+.table-wrap { overflow-x:auto; }
+.dt { width:100%; border-collapse:collapse; font-size:12px; }
+.dt th { background:var(--gradient-primary); color:white; padding:8px 10px; text-align:left; font-weight:600; white-space:nowrap; }
+.dt td { padding:7px 10px; border-bottom:1px solid var(--border-color); white-space:nowrap; }
+.dt tr:hover td { background:var(--bg-hover); }
+.url-cell { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.title-cell { max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.badge { padding:2px 8px; border-radius:10px; font-size:11px; font-weight:500; }
+.badge.ok { background:rgba(24,160,88,.15); color:var(--color-success); }
+.badge.err { background:rgba(208,48,80,.15); color:var(--color-danger); }
+
+.st { padding:2px 8px; border-radius:4px; font-size:11px; font-weight:500; }
+.st-completed { background:rgba(24,160,88,.15); color:var(--color-success); }
+.st-running { background:rgba(32,128,240,.15); color:var(--color-primary); }
+.st-pending, .st-cancelled { background:rgba(156,163,175,.15); color:var(--text-secondary); }
+.st-failed { background:rgba(208,48,80,.15); color:var(--color-danger); }
+
+.empty { text-align:center; padding:60px 20px; color:var(--text-secondary); }
+.empty-icon { font-size:48px; margin-bottom:12px; }
+.empty h3 { color:var(--text-primary); margin-bottom:6px; }
 </style>
