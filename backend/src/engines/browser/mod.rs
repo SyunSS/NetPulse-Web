@@ -172,8 +172,8 @@ fn test_page_blocking(chrome_path: &str, headless: bool, url: &str, _timeout: Du
 
     let nav_elapsed = nav_start.elapsed().as_secs_f64() * 1000.0;
 
-    // 等待 1 秒让性能数据稳定
-    std::thread::sleep(Duration::from_secs(1));
+    // 等待 3 秒让所有资源加载完成
+    std::thread::sleep(Duration::from_secs(3));
 
     // 注入 JS 采集 Performance API 数据
     let perf_data: PerfData = match tab.evaluate(PERF_JS, true) {
@@ -287,8 +287,15 @@ const PERF_JS: &str = r#"
     const resourceEntries = performance.getEntriesByType('resource');
     let resourceTotalSize = 0;
     for (const entry of resourceEntries) {
-        resourceTotalSize += entry.transferSize || 0;
+        // transferSize 经常为 0（缓存 / 跨域），用 encodedBodySize 兜底
+        const size = entry.transferSize || entry.encodedBodySize || entry.decodedBodySize || 0;
+        resourceTotalSize += size;
     }
+
+    // 也统计 navigation entry（HTML 文档本身）
+    const navSize = navEntries.length > 0
+        ? (navEntries[0].transferSize || navEntries[0].encodedBodySize || 0)
+        : 0;
 
     return {
         firstPaint: firstPaint,
@@ -296,7 +303,7 @@ const PERF_JS: &str = r#"
         domContentLoaded: domContentLoaded,
         loadEventEnd: loadEventEnd,
         resourceCount: resourceEntries.length,
-        resourceTotalSize: resourceTotalSize
+        resourceTotalSize: resourceTotalSize + navSize
     };
 })()
 "#;

@@ -368,7 +368,7 @@ fn build_inject_js(video_selector: &str, play_duration: Duration) -> String {
     )
 }
 
-/// 采集最终数据的 JS — 使用配置的 CSS 选择器
+/// 采集最终数据的 JS — 主动查询 video 元素的实际状态
 fn build_collect_js(video_selector: &str) -> String {
     let selector_escaped = video_selector.replace('\\', "\\\\").replace('\'', "\\'");
     format!(
@@ -377,13 +377,35 @@ fn build_collect_js(video_selector: &str) -> String {
     if (!window.__videoStats) return {{ play_success: false }};
     const s = window.__videoStats;
 
-    let video = document.querySelector('{0}');
-    if (!video) video = document.querySelector('video');
+    // 主动查询 video 元素当前状态（不依赖事件）
+    let video = null;
+    const selectors = ['{0}', 'video', '.video video', '#video', 'video.html5-main-video'];
+    for (const sel of selectors) {{
+        const el = document.querySelector(sel);
+        if (el && el.tagName === 'VIDEO') {{ video = el; break; }}
+    }}
+    if (!video) {{
+        const all = document.querySelectorAll('video');
+        if (all.length > 0) video = all[0];
+    }}
 
     if (video) {{
+        // 实时检测：未暂停 + currentTime > 0 视为已播放
+        if (!s.play_success && !video.paused && video.currentTime > 0) {{
+            s.first_play_time_ms = performance.now() - s._start_time;
+            s.play_success = true;
+        }}
+        if (video.duration && !s.video_duration_ms) {{
+            s.video_duration_ms = video.duration * 1000;
+        }}
         if (video.webkitDecodedFrameCount !== undefined) s.decoded_frames = video.webkitDecodedFrameCount;
         if (video.webkitDroppedFrameCount !== undefined) s.dropped_frames = video.webkitDroppedFrameCount;
-        if (video.duration && !s.video_duration_ms) s.video_duration_ms = video.duration * 1000;
+
+        // 二次尝试：currentTime 已经是 > 0 但 paused 状态为 true 也算有播放过
+        if (!s.play_success && video.currentTime > 0.5) {{
+            s.first_play_time_ms = performance.now() - s._start_time;
+            s.play_success = true;
+        }}
     }}
 
     if (s.video_size && s.first_play_time_ms) {{
