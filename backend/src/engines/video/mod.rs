@@ -126,11 +126,11 @@ impl VideoEngine {
         // 等待播放
         tokio::time::sleep(self.play_duration).await;
 
-        // 采集最终结果 — 同步 JS
+        // 采集最终结果 — 同步 JS (内部 JSON.stringify)
         let collect_js = build_collect_js_sync(&video_selector);
         let final_data: VideoJsData = page.evaluate_sync(&collect_js)
             .ok()
-            .and_then(|v| serde_json::from_value(v).ok())
+            .and_then(|v| v.as_str().and_then(|s| serde_json::from_str(s).ok()))
             .unwrap_or_default();
 
         let title = page.evaluate_sync("document.title").ok()
@@ -244,7 +244,7 @@ fn build_inject_js_sync(video_selector: &str) -> String {
 fn build_collect_js_sync(video_selector: &str) -> String {
     format!(
         r#"
-(function() {{
+JSON.stringify((function() {{
     if (!window.__videoStats) return {{ play_success: false }};
     var s = window.__videoStats;
 
@@ -301,7 +301,7 @@ fn build_collect_js_sync(video_selector: &str) -> String {
         dropped_frames: s.dropped_frames,
         decoded_frames: s.decoded_frames
     }};
-}})()
+}})())
 "#,
         video_selector.replace('\'', "\\'")
     )

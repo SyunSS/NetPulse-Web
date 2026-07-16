@@ -86,15 +86,20 @@ impl BrowserEngine {
         // 等待页面充分渲染
         tokio::time::sleep(Duration::from_secs(3)).await;
 
-        // 注入 JS 采集 Performance API 数据
+        // 注入 JS 采集 Performance API 数据 (JS 内部 JSON.stringify)
         let perf_data: PerfData = match page.evaluate_sync(PERF_JS) {
-            Ok(val) => serde_json::from_value(val).unwrap_or_default(),
+            Ok(val) => {
+                // evaluate_sync 返回 JS string → 需要二次解析
+                val.as_str()
+                    .and_then(|s| serde_json::from_str(s).ok())
+                    .unwrap_or_default()
+            }
             Err(e) => {
-                debug!("Performance API 第一次采集失败: {}", e);
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                debug!("Performance API 采集失败: {}", e);
+                tokio::time::sleep(Duration::from_millis(1000)).await;
                 page.evaluate_sync(PERF_JS)
                     .ok()
-                    .and_then(|v| serde_json::from_value(v).ok())
+                    .and_then(|v| v.as_str().and_then(|s| serde_json::from_str(s).ok()))
                     .unwrap_or_default()
             }
         };
@@ -163,8 +168,7 @@ struct PerfData {
     resource_total_size: i32,
 }
 
-const PERF_JS: &str = r#"
-(function() {
+const PERF_JS: &str = r#"JSON.stringify((function() {
     var t = performance.timing;
     var domContentLoaded = (t.domContentLoadedEventEnd > 0) ? (t.domContentLoadedEventEnd - t.navigationStart) : null;
     var loadEventEnd = (t.loadEventEnd > 0) ? (t.loadEventEnd - t.navigationStart) : null;
@@ -188,5 +192,4 @@ const PERF_JS: &str = r#"
         resource_count: resources.length,
         resource_total_size: totalSize
     };
-})()
-"#;
+})())"#;
