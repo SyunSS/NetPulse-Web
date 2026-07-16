@@ -277,10 +277,17 @@ impl PlanService {
         let mut task_ids = Vec::new();
         for item in &plan_data.items {
             let task_id = Uuid::new_v4().to_string();
+            // 合并 repeat_count 到 options
+            let mut opts: serde_json::Value = serde_json::from_str(
+                item.options.as_deref().unwrap_or("null")
+            ).unwrap_or(serde_json::Value::Null);
+            if opts.is_null() { opts = serde_json::json!({}); }
+            opts["repeat_count"] = serde_json::json!(item.repeat_count);
+
             let config = serde_json::json!({
                 "plan_id": plan_id,
                 "plan_run_id": plan_run_id,
-                "options": serde_json::from_str::<serde_json::Value>(item.options.as_deref().unwrap_or("null")).unwrap_or(serde_json::Value::Null),
+                "options": &opts,
             });
 
             sqlx::query(
@@ -303,8 +310,7 @@ impl PlanService {
                 user_id: user_id.to_string(),
                 task_type: item.task_type.clone(),
                 urls,
-                options: serde_json::from_str(&item.options.clone().unwrap_or_else(|| "null".to_string()))
-                    .unwrap_or(serde_json::Value::Null),
+                options: opts,
             };
             task_tx.send(job).await?;
 

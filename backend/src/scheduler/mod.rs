@@ -134,12 +134,17 @@ impl PlanScheduler {
         let mut all_task_ids: Vec<String> = Vec::new();
         for item in &items {
             let task_id = Uuid::new_v4().to_string();
+            // 合并 repeat_count 到 options
+            let mut opts: serde_json::Value = serde_json::from_str(
+                item.options.as_deref().unwrap_or("null")
+            ).unwrap_or(serde_json::Value::Null);
+            if opts.is_null() { opts = serde_json::json!({}); }
+            opts["repeat_count"] = serde_json::json!(item.repeat_count);
+
             let config = serde_json::json!({
                 "plan_id": plan.id,
                 "plan_run_id": plan_run_id,
-                "options": serde_json::from_str::<serde_json::Value>(
-                    item.options.as_deref().unwrap_or("null")
-                ).unwrap_or(serde_json::Value::Null),
+                "options": &opts,
             });
 
             sqlx::query(
@@ -153,7 +158,7 @@ impl PlanScheduler {
             let job = TaskJob {
                 task_id: task_id.clone(), user_id: plan.user_id.clone(),
                 task_type: item.task_type.clone(), urls,
-                options: serde_json::from_str(item.options.as_deref().unwrap_or("null")).unwrap_or(serde_json::Value::Null),
+                options: opts,
             };
             if let Err(e) = self.task_tx.send(job).await {
                 error!("派发失败: {}", e);

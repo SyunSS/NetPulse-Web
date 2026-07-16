@@ -1,4 +1,3 @@
-use std::ffi::OsStr;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -137,34 +136,9 @@ impl BrowserPage for HeadlessChromePage {
     }
 }
 
-// ─── ChromiumoxideProvider (桩) ──────────────────────
-
-pub struct ChromiumoxideProvider;
-
-#[async_trait]
-impl BrowserProvider for ChromiumoxideProvider {
-    async fn launch(
-        &self,
-        _path: String,
-        _headless: bool,
-        extra_args: Vec<String>,
-    ) -> anyhow::Result<Box<dyn BrowserHandle>> {
-        anyhow::bail!("chromiumoxide 后端尚未实现，请使用 headless_chrome")
-    }
-}
-
 // ─── Factory ─────────────────────────────────────────
 
-pub fn create_browser_provider(config: &BrowserConfig) -> anyhow::Result<Box<dyn BrowserProvider>> {
-    match config.provider.as_str() {
-        "headless_chrome" => {
-            info!("浏览器后端: headless_chrome");
-            Ok(Box::new(HeadlessChromeProvider::new()))
-        }
-        "chromiumoxide" => {
-            info!("浏览器后端: chromiumiumoxide (桩)");
-            Ok(Box::new(ChromiumoxideProvider))
-        }
-        other => anyhow::bail!("不支持的浏览器后端: {}，可用: headless_chrome", other),
-    }
+pub fn create_browser_provider(_config: &BrowserConfig) -> anyhow::Result<Box<dyn BrowserProvider>> {
+    info!("浏览器后端: headless_chrome");
+    Ok(Box::new(HeadlessChromeProvider::new()))
 }

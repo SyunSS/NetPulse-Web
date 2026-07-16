@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     // 创建浏览器提供者
     let browser_provider: Arc<Box<dyn crate::engines::browser::provider::BrowserProvider>> =
         Arc::new(crate::engines::browser::provider::create_browser_provider(&config.browser)?);
-    info!("浏览器提供者已创建: {}", config.browser.provider);
+    info!("浏览器提供者已创建");
 
     // 启动 Worker
     let worker = TaskWorker::new(

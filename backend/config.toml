@@ -12,7 +12,6 @@ level = "info"
 file_dir = "./logs"
 
 [browser]
-provider = "headless_chrome"
 path = "/usr/bin/chromium"
 headless = true
 

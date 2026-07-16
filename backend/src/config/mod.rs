@@ -83,12 +83,9 @@ pub struct LoggingConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BrowserConfig {
-    #[serde(default = "default_provider")]
-    pub provider: String,
     pub path: String,
     pub headless: bool,
 }
-fn default_provider() -> String { "headless_chrome".to_string() }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TaskConfig {
