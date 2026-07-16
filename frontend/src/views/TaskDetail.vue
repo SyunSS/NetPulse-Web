@@ -133,12 +133,12 @@ const stClass = (s: string) => `st st-${s}`
     </div>
 
     <!-- 网站测试结果 -->
-    <div v-if="!isVideoTask && !isDownloadTask && websiteResults.length" class="card">
+    <div v-if="!isVideoTask && !isDownloadTask && !isPingTask && websiteResults.length" class="card">
       <div class="card-title">🌐 网站测试结果 ({{ websiteResults.length }} 条)</div>
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
-            <th>URL</th><th>DNS解析时延(ms)</th><th>DNS解析成功率(%)</th><th>TCP连接时延(ms)</th><th>TLS握手时延(ms)</th><th>HTTP状态码</th><th>首包时延(ms)</th><th>首屏时延(ms)</th><th>首页时延(ms)</th><th>访问成功率(%)</th><th>页面标题</th>
+            <th>URL</th><th>DNS解析时延(ms)</th><th>DNS解析成功率(%)</th><th>TCP连接时延(ms)</th><th>TLS握手时延(ms)</th><th>HTTP状态码</th><th>首包时延(ms)</th><th>首屏时延(FP)</th><th>FCP(ms)</th><th>DOM加载(ms)</th><th>Load事件(ms)</th><th>首页打开(ms)</th><th>资源数</th><th>大小(B)</th><th>页面标题</th><th>错误</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in websiteResults" :key="r.id">
@@ -149,10 +149,15 @@ const stClass = (s: string) => `st st-${s}`
               <td>{{ r.tls_time_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.http_status ?? '-' }}</td>
               <td>{{ r.ttfb_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.fp_ms?.toFixed(1) ?? r.fcp_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.fp_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.fcp_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.dom_content_loaded_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.load_event_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.page_open_time_ms?.toFixed(0) ?? '-' }}</td>
-              <td>{{ r.error_msg ? '0' : '100' }}</td>
+              <td>{{ r.resource_count ?? '-' }}</td>
+              <td>{{ r.resource_total_size ?? '-' }}</td>
               <td class="title-cell">{{ r.page_title || '-' }}</td>
+              <td class="err-cell">{{ r.error_msg || '-' }}</td>
             </tr>
           </tbody>
         </table>

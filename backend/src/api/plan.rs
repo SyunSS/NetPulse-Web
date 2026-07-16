@@ -200,6 +200,7 @@ async fn export_plan_run(
     let mut website_data = Vec::new();
     let mut video_data = Vec::new();
     let mut download_data = Vec::new();
+    let mut ping_data = Vec::new();
     let mut task_summaries = Vec::new();
 
     for tid in &task_ids {
@@ -213,7 +214,7 @@ async fn export_plan_run(
         .map_err(|e| AppError::internal(&e.to_string()))?;
 
         if let Some((task_type, status)) = task_row {
-            // 查每种类型的 url（用测试结果的 url 字段）
+            // 查每种类型的 url（用测试结果的 url/host 字段）
             let url: String = match task_type.as_str() {
                 "website" => sqlx::query_scalar::<_, String>(
                     "SELECT url FROM website_result WHERE task_id = ? LIMIT 1",
@@ -233,6 +234,14 @@ async fn export_plan_run(
                 .unwrap_or_default(),
                 "download" => sqlx::query_scalar::<_, String>(
                     "SELECT url FROM download_result WHERE task_id = ? LIMIT 1",
+                )
+                .bind(tid)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|e| AppError::internal(&e.to_string()))?
+                .unwrap_or_default(),
+                "ping" => sqlx::query_scalar::<_, String>(
+                    "SELECT host FROM ping_result WHERE task_id = ? LIMIT 1",
                 )
                 .bind(tid)
                 .fetch_optional(&state.db)
@@ -281,6 +290,16 @@ async fn export_plan_run(
                     .map_err(|e| AppError::internal(&e.to_string()))?;
                     download_data.extend(results);
                 }
+                "ping" => {
+                    let results: Vec<crate::models::task::PingResult> = sqlx::query_as(
+                        "SELECT * FROM ping_result WHERE task_id = ?",
+                    )
+                    .bind(tid)
+                    .fetch_all(&state.db)
+                    .await
+                    .map_err(|e| AppError::internal(&e.to_string()))?;
+                    ping_data.extend(results);
+                }
                 _ => {}
             }
         }
@@ -292,7 +311,7 @@ async fn export_plan_run(
             use crate::report::excel;
             let dir = &state.config.storage.excel_dir;
             let path = excel::export_plan_run_xlsx(
-                &task_summaries, &website_data, &video_data, &download_data,
+                &task_summaries, &website_data, &video_data, &download_data, &ping_data,
                 &plan_id, &run_id, dir,
             )
             .map_err(|e| AppError::internal(&e.to_string()))?;
@@ -321,6 +340,7 @@ async fn export_plan_run(
                 "website_results": website_data,
                 "video_results": video_data,
                 "download_results": download_data,
+                "ping_results": ping_data,
             }))
             .map_err(|e| AppError::internal(&e.to_string()))?
         }

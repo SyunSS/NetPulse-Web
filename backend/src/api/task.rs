@@ -11,7 +11,6 @@ use crate::services::auth_service::Claims;
 use crate::services::task_service::TaskService;
 use crate::storage::StorageManager;
 use crate::utils::response::{ok, ok_with_msg, AppError, AppState};
-
 /// 构建任务路由
 pub fn task_routes() -> Router<AppState> {
     Router::new()
@@ -221,6 +220,14 @@ async fn export_result(
                 let bytes = std::fs::read(&path).map_err(|e| AppError::internal(&e.to_string()))?;
                 Ok(file_response(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", &format!("download_{}.xlsx", task_id)))
             }
+            "ping" => {
+                let data = TaskService::get_ping_results(&state.db, &task_id).await
+                    .map_err(|e| AppError::internal(&e.to_string()))?;
+                let path = crate::report::excel::export_ping_xlsx(&data, &task_id, dir)
+                    .map_err(|e| AppError::internal(&e.to_string()))?;
+                let bytes = std::fs::read(&path).map_err(|e| AppError::internal(&e.to_string()))?;
+                Ok(file_response(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", &format!("ping_{}.xlsx", task_id)))
+            }
             _ => Err(AppError::bad_request("不支持的任务类型")),
         };
     }
@@ -243,6 +250,12 @@ async fn export_result(
                 .await
                 .map_err(|e| AppError::internal(&e.to_string()))?;
             export_typed(&data, &task_id, dir, &query.format, "download")
+        }
+        "ping" => {
+            let data = TaskService::get_ping_results(&state.db, &task_id)
+                .await
+                .map_err(|e| AppError::internal(&e.to_string()))?;
+            export_typed(&data, &task_id, dir, &query.format, "ping")
         }
         _ => Err(AppError::bad_request("不支持的任务类型")),
     }
