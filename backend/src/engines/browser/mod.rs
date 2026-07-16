@@ -172,15 +172,25 @@ fn test_page_blocking(chrome_path: &str, headless: bool, url: &str, _timeout: Du
 
     let nav_elapsed = nav_start.elapsed().as_secs_f64() * 1000.0;
 
-    // PERF_JS 内部等待 readyState + 8s 超时，这里再等 1s 兜底
-    std::thread::sleep(Duration::from_secs(1));
+    // 等待页面充分渲染 (DOM + JS + lazy load)
+    std::thread::sleep(Duration::from_secs(3));
 
-    // 注入 JS 采集 Performance API 数据
-    let perf_data: PerfData = match tab.evaluate(PERF_JS, true) {
+    // 注入 JS 采集 Performance API 数据（同步 IIFE）
+    let perf_data: PerfData = match tab.evaluate(PERF_JS, false) {
         Ok(remote_obj) => {
             match &remote_obj.value {
                 Some(val) => serde_json::from_value(val.clone()).unwrap_or_default(),
-                None => PerfData::default(),
+                None => {
+                    // 重试一次
+                    std::thread::sleep(Duration::from_millis(500));
+                    if let Ok(retry) = tab.evaluate(PERF_JS, false) {
+                        retry.value.as_ref()
+                            .and_then(|v| serde_json::from_value(v.clone()).ok())
+                            .unwrap_or_default()
+                    } else {
+                        PerfData::default()
+                    }
+                }
             }
         }
         Err(e) => {
@@ -250,75 +260,48 @@ fn error_result(msg: &str) -> BrowserResult {
 /// Performance API 采集的数据
 #[derive(Debug, Default, Deserialize)]
 struct PerfData {
-    #[serde(rename = "firstPaint", default)]
+    #[serde(rename = "first_paint", default)]
     first_paint: Option<f64>,
-    #[serde(rename = "firstContentfulPaint", default)]
+    #[serde(rename = "first_contentful_paint", default)]
     first_contentful_paint: Option<f64>,
-    #[serde(rename = "domContentLoaded", default)]
+    #[serde(rename = "dom_content_loaded", default)]
     dom_content_loaded: Option<f64>,
-    #[serde(rename = "loadEventEnd", default)]
+    #[serde(rename = "load_event_end", default)]
     load_event_end: Option<f64>,
-    #[serde(rename = "resourceCount", default)]
+    #[serde(rename = "resource_count", default)]
     resource_count: i32,
-    #[serde(rename = "resourceTotalSize", default)]
+    #[serde(rename = "resource_total_size", default)]
     resource_total_size: i32,
 }
 
-/// 注入的 JS 脚本，采集 Performance API 数据
+/// 注入的 JS 脚本 — 非异步，直接读 performance.timing + paint entries
 const PERF_JS: &str = r#"
-(async () => {
-    // 等待页面完全加载（最多 8 秒）
-    const waitForLoad = () => new Promise(resolve => {
-        if (document.readyState === 'complete') return resolve();
-        const timer = setTimeout(() => resolve(), 8000);
-        window.addEventListener('load', () => { clearTimeout(timer); resolve(); }, { once: true });
-    });
-    await waitForLoad();
+(function() {
+    var t = performance.timing;
+    var domContentLoaded = (t.domContentLoadedEventEnd > 0) ? (t.domContentLoadedEventEnd - t.navigationStart) : null;
+    var loadEventEnd = (t.loadEventEnd > 0) ? (t.loadEventEnd - t.navigationStart) : null;
 
-    // 再等 1.5 秒让所有 XHR/fetch 完成
-    await new Promise(r => setTimeout(r, 1500));
-
-    // 用 PerformanceObserver 收集所有资源条目（包括 lazy-loaded）
-    const allEntries = performance.getEntriesByType('resource');
-    let resourceTotalSize = 0;
-    let videoSize = 0;
-    let countWithSize = 0;
-    for (const entry of allEntries) {
-        const size = entry.transferSize || entry.encodedBodySize || entry.decodedBodySize || 0;
-        resourceTotalSize += size;
-        // 视频/HLS 资源单独统计
-        if (entry.initiatorType === 'video' || entry.name.match(/\.(mp4|m3u8|ts|m4s|webm|flv)/)) {
-            videoSize += size;
-        }
-        if (size > 0) countWithSize++;
+    var firstPaint = null, firstContentfulPaint = null;
+    var paintEntries = performance.getEntriesByType('paint');
+    for (var i=0; i<paintEntries.length; i++) {
+        var e = paintEntries[i];
+        if (e.name === 'first-paint') firstPaint = e.startTime;
+        if (e.name === 'first-contentful-paint') firstContentfulPaint = e.startTime;
     }
 
-    // 加上 navigation entry 自身
-    const navEntries = performance.getEntriesByType('navigation');
-    let navSize = 0, firstPaint = null, firstContentfulPaint = null, domContentLoaded = null, loadEventEnd = null;
-    if (navEntries.length > 0) {
-        const nav = navEntries[0];
-        navSize = nav.transferSize || nav.encodedBodySize || 0;
-        domContentLoaded = nav.domContentLoadedEventEnd;
-        loadEventEnd = nav.loadEventEnd;
-    }
-
-    // Paint Timing
-    const paintEntries = performance.getEntriesByType('paint');
-    for (const entry of paintEntries) {
-        if (entry.name === 'first-paint' && firstPaint === null) firstPaint = entry.startTime;
-        if (entry.name === 'first-contentful-paint' && firstContentfulPaint === null) firstContentfulPaint = entry.startTime;
+    var resources = performance.getEntriesByType('resource');
+    var totalSize = 0;
+    for (var i=0; i<resources.length; i++) {
+        totalSize += (resources[i].transferSize || resources[i].encodedBodySize || 0);
     }
 
     return {
-        firstPaint: firstPaint,
-        firstContentfulPaint: firstContentfulPaint,
-        domContentLoaded: domContentLoaded,
-        loadEventEnd: loadEventEnd,
-        resourceCount: allEntries.length,
-        resourceTotalSize: resourceTotalSize + navSize,
-        videoSize: videoSize,
-        countWithSize: countWithSize
+        first_paint: firstPaint,
+        first_contentful_paint: firstContentfulPaint,
+        dom_content_loaded: domContentLoaded,
+        load_event_end: loadEventEnd,
+        resource_count: resources.length,
+        resource_total_size: totalSize
     };
 })()
 "#;
