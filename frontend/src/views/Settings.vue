@@ -25,7 +25,7 @@ async function fetchUsers() {
   loading.value = true
   try {
     const res = await http.get('/admin/users')
-    users.value = res.data.data || []
+    users.value = res.data || []
   } catch (e: any) {
     message.error(e.message || '加载用户列表失败')
   } finally {

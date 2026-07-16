@@ -74,7 +74,7 @@ impl AuthService {
         Ok(UserInfo {
             id,
             username: req.username.clone(),
-            role: "user".to_string(),
+            role: role.to_string(),
         })
     }
 
