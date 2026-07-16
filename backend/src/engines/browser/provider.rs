@@ -55,6 +55,7 @@ impl BrowserProvider for HeadlessChromeProvider {
     ) -> anyhow::Result<Box<dyn BrowserHandle>> {
         let path_buf = std::path::PathBuf::from(&path);
 
+        // headless Chrome 默认无磁盘缓存，加 --incognito 确保隔离
         let options = LaunchOptions::default_builder()
             .headless(headless)
             .sandbox(false)
@@ -69,7 +70,7 @@ impl BrowserProvider for HeadlessChromeProvider {
             .await.context("spawn_blocking 失败")?
             .context("浏览器启动失败")?;
 
-        debug!("HeadlessChrome 已启动");
+        debug!("HeadlessChrome 已启动 (无缓存模式)");
         Ok(Box::new(HeadlessChromeHandle { browser: Arc::new(browser) }))
     }
 }
@@ -146,7 +147,7 @@ impl BrowserProvider for ChromiumoxideProvider {
         &self,
         _path: String,
         _headless: bool,
-        _extra_args: Vec<String>,
+        extra_args: Vec<String>,
     ) -> anyhow::Result<Box<dyn BrowserHandle>> {
         anyhow::bail!("chromiumoxide 后端尚未实现，请使用 headless_chrome")
     }
