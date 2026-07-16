@@ -43,6 +43,17 @@ async function updateRole(userId: string, role: string) {
   }
 }
 
+async function deleteUser(userId: string, username: string) {
+  if (!confirm(`确认删除用户「${username}」？此操作不可撤销。`)) return
+  try {
+    await http.delete(`/admin/users/${userId}`)
+    message.success(`用户「${username}」已删除`)
+    fetchUsers()
+  } catch (e: any) {
+    message.error(e.message || '删除失败')
+  }
+}
+
 onMounted(() => {
   if (isAdmin) fetchUsers()
 })
@@ -96,14 +107,17 @@ onMounted(() => {
               <div class="user-role-text">{{ u.role === 'admin' ? '管理员' : '普通用户' }}</div>
             </div>
           </div>
-          <select
-            class="role-select"
-            :value="u.role"
-            @change="(e: any) => updateRole(u.id, e.target.value)"
-          >
-            <option value="user">普通用户</option>
-            <option value="admin">管理员</option>
-          </select>
+          <div class="user-actions">
+            <select
+              class="role-select"
+              :value="u.role"
+              @change="(e: any) => updateRole(u.id, e.target.value)"
+            >
+              <option value="user">普通用户</option>
+              <option value="admin">管理员</option>
+            </select>
+            <button class="delete-btn" @click="deleteUser(u.id, u.username)" title="删除用户">🗑</button>
+          </div>
         </div>
       </div>
     </div>
@@ -148,6 +162,13 @@ onMounted(() => {
 .user-name { font-size: 13px; font-weight: 500; }
 .user-role-text { font-size: 11px; color: var(--text-tertiary); }
 .role-select { height: 32px; padding: 0 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-card); color: var(--text-primary); font-size: 13px; cursor: pointer; }
+.user-actions { display: flex; align-items: center; gap: 8px; }
+.delete-btn {
+  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; background: transparent; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 14px; transition: all var(--transition-fast);
+}
+.delete-btn:hover { background: rgba(208,48,80,0.1); border-color: var(--color-danger); color: var(--color-danger); }
 .danger-btn { height: 36px; padding: 0 16px; border: 1px solid var(--color-danger); background: var(--bg-card); color: var(--color-danger); border-radius: var(--radius-md); cursor: pointer; font-size: 13px; }
 .danger-btn:hover { background: var(--color-danger); color: white; }
 .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
