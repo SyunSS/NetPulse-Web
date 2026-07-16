@@ -7,7 +7,7 @@ pub struct AppConfig {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
     pub logging: LoggingConfig,
-    pub chrome: ChromeConfig,
+    pub browser: BrowserConfig,
     pub task: TaskConfig,
     pub storage: StorageConfig,
     pub jwt: JwtConfig,
@@ -82,10 +82,13 @@ pub struct LoggingConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ChromeConfig {
+pub struct BrowserConfig {
+    #[serde(default = "default_provider")]
+    pub provider: String,
     pub path: String,
     pub headless: bool,
 }
+fn default_provider() -> String { "headless_chrome".to_string() }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TaskConfig {

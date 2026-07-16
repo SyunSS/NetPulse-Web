@@ -11,7 +11,8 @@ path = "./data/netpulse.db"
 level = "info"
 file_dir = "./logs"
 
-[chrome]
+[browser]
+provider = "headless_chrome"
 path = "/usr/bin/chromium"
 headless = true
 

@@ -48,12 +48,18 @@ async fn main() -> anyhow::Result<()> {
     let (progress_tx, _) = broadcast::channel::<crate::utils::response::ProgressMessage>(256);
     info!("消息通道已创建");
 
+    // 创建浏览器提供者
+    let browser_provider: Arc<Box<dyn crate::engines::browser::provider::BrowserProvider>> =
+        Arc::new(crate::engines::browser::provider::create_browser_provider(&config.browser)?);
+    info!("浏览器提供者已创建: {}", config.browser.provider);
+
     // 启动 Worker
     let worker = TaskWorker::new(
         db_pool.clone(),
         Arc::new(config.clone()),
         task_rx,
         progress_tx.clone(),
+        browser_provider,
     );
     worker.start();
     info!("TaskWorker 已启动");

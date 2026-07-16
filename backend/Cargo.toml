@@ -57,6 +57,9 @@ hickory-resolver = "0.24"
 # 浏览器 CDP
 headless_chrome = "1.0"
 
+# 异步 trait
+async-trait = "0.1"
+
 # 并发控制 + 异步工具
 tokio-util = "0.7"
 futures = "0.3"
