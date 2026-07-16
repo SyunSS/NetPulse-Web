@@ -383,7 +383,7 @@ async fn run_video_task(
     db: SqlitePool,
     config: Arc<AppConfig>,
     progress_tx: broadcast::Sender<ProgressMessage>,
-    _browser_provider: Arc<Box<dyn BrowserProvider>>,
+    browser_provider: Arc<Box<dyn BrowserProvider>>,
     job: TaskJob,
 ) -> anyhow::Result<()> {
     let task_id = &job.task_id;
@@ -412,7 +412,7 @@ async fn run_video_task(
 
         log_progress(&progress_tx, task_id, "info", &format!("视频测试: {}", url));
 
-        match test_single_video(&db, &config, task_id, url, timeout).await {
+        match test_single_video(&db, &config, &browser_provider, task_id, url, timeout).await {
             Ok(result) => {
                 success_count += 1;
                 let _ = progress_tx.send(ProgressMessage::UrlCompleted {
@@ -508,6 +508,7 @@ async fn run_video_task(
 async fn test_single_video(
     db: &SqlitePool,
     config: &AppConfig,
+    browser_provider: &Arc<Box<dyn BrowserProvider>>,
     task_id: &str,
     url: &str,
     timeout: Duration,
@@ -517,7 +518,7 @@ async fn test_single_video(
 
     // 视频引擎测试 — 配置驱动平台匹配
     let platform_cfg = match_platform(&config.video_platforms, url);
-    let video_engine = VideoEngine::new(&config.browser.path, config.browser.headless, timeout);
+    let video_engine = VideoEngine::new(browser_provider.clone(), &config.browser.path, config.browser.headless, timeout);
     let video_result = video_engine.test_page(url, &platform_cfg).await;
 
     // 保存截图

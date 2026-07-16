@@ -1,12 +1,11 @@
-use std::ffi::OsStr;
+use std::sync::Arc;
 use std::time::Duration;
 
-use headless_chrome::protocol::cdp::Page::CaptureScreenshotFormatOption;
-use headless_chrome::{Browser, LaunchOptions};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
 use crate::config::VideoPlatformConfig;
+use crate::engines::browser::provider::{BrowserPage, BrowserProvider};
 use crate::engines::dns::DnsEngine;
 use crate::engines::http::HttpEngine;
 
@@ -33,8 +32,9 @@ pub struct VideoTestResult {
     pub error: Option<String>,
 }
 
-/// 视频测试引擎 — 配置驱动
+/// 视频测试引擎 — 通过 BrowserProvider trait
 pub struct VideoEngine {
+    provider: Arc<Box<dyn BrowserProvider>>,
     chrome_path: String,
     headless: bool,
     timeout: Duration,
@@ -42,8 +42,14 @@ pub struct VideoEngine {
 }
 
 impl VideoEngine {
-    pub fn new(chrome_path: &str, headless: bool, timeout: Duration) -> Self {
+    pub fn new(
+        provider: Arc<Box<dyn BrowserProvider>>,
+        chrome_path: &str,
+        headless: bool,
+        timeout: Duration,
+    ) -> Self {
         Self {
+            provider,
             chrome_path: chrome_path.to_string(),
             headless,
             timeout,
@@ -51,7 +57,7 @@ impl VideoEngine {
         }
     }
 
-    /// 测试视频页面（需传入匹配后的平台配置）
+    /// 测试视频页面
     pub async fn test_page(&self, url: &str, platform_cfg: &VideoPlatformConfig) -> VideoTestResult {
         info!("视频测试开始: {} (平台: {})", url, platform_cfg.name);
 
@@ -63,357 +69,197 @@ impl VideoEngine {
         // 2. HTTP/TCP 探测
         let http_result = HttpEngine::probe(url, self.timeout).await;
 
-        // 仅检测可访问性的平台（如 Netflix）
-        if platform_cfg.is_detect_only() {
-            let mut r = self.test_detect_only(url, platform_cfg).await;
-            r.dns_time_ms = Some(dns_result.dns_time_ms);
-            r.dns_success = dns_result.dns_success;
-            r.tcp_time_ms = Some(http_result.tcp_time_ms);
-            r.http_response_ms = Some(http_result.ttfb_ms);
-            return r;
+        // 3. 浏览器探测
+        let extra_args = if platform_cfg.is_detect_only() {
+            vec![]
+        } else {
+            vec!["--autoplay-policy=no-user-gesture-required".to_string(),
+                 "--mute-audio".to_string()]
+        };
+
+        let handle = match self.provider.launch(self.chrome_path.clone(), self.headless, extra_args).await {
+            Ok(h) => h,
+            Err(e) => return video_err(&platform_cfg.name, &e.to_string(), dns_result, http_result),
+        };
+
+        let page = match handle.new_page().await {
+            Ok(p) => p,
+            Err(e) => return video_err(&platform_cfg.name, &e.to_string(), dns_result, http_result),
+        };
+
+        if let Err(e) = page.navigate_to(url).await {
+            return video_err(&platform_cfg.name, &e.to_string(), dns_result, http_result);
+        }
+        if let Err(e) = page.wait_for_load().await {
+            debug!("等待导航完成: {}", e);
         }
 
-        let chrome_path = self.chrome_path.clone();
-        let headless = self.headless;
-        let play_duration = self.play_duration;
-        let url = url.to_string();
-        let platform_name = platform_cfg.name.clone();
+        // 仅检测可访问性
+        if platform_cfg.is_detect_only() {
+            let title = page.evaluate_sync("document.title").ok()
+                .and_then(|v| v.as_str().map(|s| s.to_string()));
+            let accessible = true; // 已成功导航
+
+            return VideoTestResult {
+                platform: platform_cfg.name.clone(),
+                dns_time_ms: Some(dns_result.dns_time_ms),
+                dns_success: dns_result.dns_success,
+                tcp_time_ms: Some(http_result.tcp_time_ms),
+                http_response_ms: Some(http_result.ttfb_ms),
+                play_success: accessible,
+                page_title: title,
+                error: None,
+                ..Default::default()
+            };
+        }
+
+        // 完整视频播放检测
         let wait_seconds = platform_cfg.wait_seconds.unwrap_or(1);
         let video_selector = platform_cfg.video_selector.clone().unwrap_or_else(|| "video".to_string());
 
-        let result = tokio::task::spawn_blocking(move || {
-            test_video_blocking(
-                &chrome_path,
-                headless,
-                &url,
-                &platform_name,
-                &video_selector,
-                wait_seconds,
-                play_duration,
-            )
-        })
-        .await;
+        tokio::time::sleep(Duration::from_secs(wait_seconds)).await;
 
-        match result {
-            Ok(r) => r,
-            Err(e) => {
-                error!("视频测试 spawn_blocking 失败: {}", e);
-                VideoTestResult {
-                    platform: platform_cfg.name.clone(),
-                    first_play_time_ms: None,
-                    buffer_count: None,
-                    total_buffer_time_ms: None,
-                    play_success: false,
-                    video_download_speed: None,
-                    video_size: None,
-                    video_duration_ms: None,
-                    dropped_frames: None,
-                    decoded_frames: None,
-                    page_title: None,
-                    screenshot: None,
-                    error: Some(format!("任务执行失败: {}", e)),
-                ..Default::default()
-                }
-            }
-        }
-    }
+        // 注入监听 JS — 改为同步 IIFE，先设置监听器再尝试播放
+        let inject_js = build_inject_js_sync(&video_selector);
+        let _ = page.evaluate_sync(&inject_js);
 
-    /// 仅检测可访问性（Netflix 等 DRM 平台）
-    async fn test_detect_only(&self, url: &str, platform_cfg: &VideoPlatformConfig) -> VideoTestResult {
-        let chrome_path = self.chrome_path.clone();
-        let headless = self.headless;
-        let url = url.to_string();
-        let platform_name = platform_cfg.name.clone();
+        // 等待播放
+        tokio::time::sleep(self.play_duration).await;
 
-        let result = tokio::task::spawn_blocking(move || {
-            let path = std::path::PathBuf::from(&chrome_path);
-            let options = LaunchOptions::default_builder()
-                .headless(headless)
-                .sandbox(false)
-                .enable_gpu(false)
-                .enable_logging(false)
-                .window_size(Some((1920, 1080)))
-                .path(Some(path))
-                .build();
+        // 采集最终结果 — 同步 JS
+        let collect_js = build_collect_js_sync(&video_selector);
+        let final_data: VideoJsData = page.evaluate_sync(&collect_js)
+            .ok()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default();
 
-            let options = match options {
-                Ok(o) => o,
-                Err(e) => return error_result(&platform_name, &format!("浏览器配置失败: {}", e)),
-            };
+        let title = page.evaluate_sync("document.title").ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
 
-            let browser = match Browser::new(options) {
-                Ok(b) => b,
-                Err(e) => return error_result(&platform_name, &format!("浏览器启动失败: {}", e)),
-            };
+        let screenshot = page.screenshot().ok();
 
-            let tab = match browser.new_tab() {
-                Ok(t) => t,
-                Err(e) => return error_result(&platform_name, &format!("创建标签页失败: {}", e)),
-            };
+        debug!("视频测试完成: {} (平台:{}) - 播放:{} 缓冲:{}次",
+            url, platform_cfg.name, final_data.play_success, final_data.buffer_count);
 
-            let accessible = tab.navigate_to(&url).is_ok()
-                && tab.wait_until_navigated().is_ok();
-
-            let title = tab
-                .evaluate("document.title", false)
-                .ok()
-                .and_then(|r| r.value)
-                .and_then(|v| v.as_str().map(|s| s.to_string()));
-
-            VideoTestResult {
-                platform: platform_name,
-                first_play_time_ms: None,
-                buffer_count: None,
-                total_buffer_time_ms: None,
-                play_success: accessible,
-                video_download_speed: None,
-                video_size: None,
-                video_duration_ms: None,
-                dropped_frames: None,
-                decoded_frames: None,
-                page_title: title,
-                screenshot: None,
-                error: if accessible {
-                    None
-                } else {
-                    Some("页面无法访问".to_string())
-                },
+        VideoTestResult {
+            platform: platform_cfg.name.clone(),
+            dns_time_ms: Some(dns_result.dns_time_ms),
+            dns_success: dns_result.dns_success,
+            tcp_time_ms: Some(http_result.tcp_time_ms),
+            http_response_ms: Some(http_result.ttfb_ms),
+            first_play_time_ms: final_data.first_play_time_ms,
+            buffer_count: Some(final_data.buffer_count),
+            total_buffer_time_ms: Some(final_data.total_buffer_time_ms),
+            play_success: final_data.play_success,
+            video_download_speed: final_data.video_download_speed,
+            video_size: final_data.video_size,
+            video_duration_ms: final_data.video_duration_ms,
+            dropped_frames: Some(final_data.dropped_frames),
+            decoded_frames: Some(final_data.decoded_frames),
+            page_title: title,
+            screenshot,
+            error: if !final_data.play_success && final_data.first_play_time_ms.is_none() {
+                Some("视频未检测到播放事件（页面已加载）".to_string())
+            } else { None },
             ..Default::default()
-            }
-        })
-        .await;
-
-        match result {
-            Ok(r) => r,
-            Err(e) => error_result(&platform_cfg.name, &format!("任务失败: {}", e)),
         }
     }
 }
 
-/// 同步阻塞的视频测试
-fn test_video_blocking(
-    chrome_path: &str,
-    headless: bool,
-    url: &str,
-    platform_name: &str,
-    video_selector: &str,
-    wait_seconds: u64,
-    play_duration: Duration,
+fn video_err(
+    platform: &str, msg: &str,
+    dns: crate::engines::dns::DnsResult,
+    http: crate::engines::http::HttpResult,
 ) -> VideoTestResult {
-    let path = std::path::PathBuf::from(chrome_path);
-    let autoplay_arg: &OsStr = OsStr::new("--autoplay-policy=no-user-gesture-required");
-    let mute_arg: &OsStr = OsStr::new("--mute-audio");
-    let options = match LaunchOptions::default_builder()
-        .headless(headless)
-        .sandbox(false)
-        .enable_gpu(false)
-        .enable_logging(false)
-        .window_size(Some((1920, 1080)))
-        .path(Some(path))
-        .args(vec![autoplay_arg, mute_arg])
-        .build()
-    {
-        Ok(o) => o,
-        Err(e) => return error_result(platform_name, &format!("浏览器配置失败: {}", e)),
-    };
-
-    let browser = match Browser::new(options) {
-        Ok(b) => b,
-        Err(e) => return error_result(platform_name, &format!("浏览器启动失败: {}", e)),
-    };
-
-    let tab = match browser.new_tab() {
-        Ok(t) => t,
-        Err(e) => return error_result(platform_name, &format!("创建标签页失败: {}", e)),
-    };
-
-    if let Err(e) = tab.navigate_to(url) {
-        return error_result(platform_name, &format!("导航失败: {}", e));
-    }
-    if let Err(e) = tab.wait_until_navigated() {
-        debug!("等待导航完成: {}", e);
-    }
-
-    // 等待页面加载（配置的等待秒数）
-    std::thread::sleep(Duration::from_secs(wait_seconds));
-
-    // 注入视频监听脚本 — 使用配置的 CSS 选择器定位 video 元素
-    let inject_result = tab.evaluate(&build_inject_js(video_selector, play_duration), true);
-    let video_data: VideoJsData = match inject_result {
-        Ok(remote_obj) => match &remote_obj.value {
-            Some(val) => serde_json::from_value(val.clone()).unwrap_or_default(),
-            None => VideoJsData::default(),
-        },
-        Err(e) => {
-            debug!("视频数据采集失败: {}", e);
-            VideoJsData::default()
-        }
-    };
-
-    // 等待播放采集
-    std::thread::sleep(play_duration);
-
-    // 采集最终结果
-    let final_data: VideoJsData = match tab.evaluate(&build_collect_js(video_selector), true) {
-        Ok(remote_obj) => match &remote_obj.value {
-            Some(val) => serde_json::from_value(val.clone()).unwrap_or_default(),
-            None => VideoJsData::default(),
-        },
-        Err(e) => {
-            debug!("最终数据采集失败: {}", e);
-            VideoJsData::default()
-        }
-    };
-
-    let title = tab
-        .evaluate("document.title", false)
-        .ok()
-        .and_then(|r| r.value)
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
-
-    let screenshot = tab
-        .capture_screenshot(CaptureScreenshotFormatOption::Png, None, None, true)
-        .ok();
-
-    debug!(
-        "视频测试完成: {} (平台:{}) - 播放成功:{} 缓冲:{}次",
-        url, platform_name, final_data.play_success, final_data.buffer_count
-    );
-
     VideoTestResult {
-        platform: platform_name.to_string(),
-        first_play_time_ms: final_data.first_play_time_ms,
-        buffer_count: Some(final_data.buffer_count),
-        total_buffer_time_ms: Some(final_data.total_buffer_time_ms),
-        play_success: final_data.play_success,
-        video_download_speed: final_data.video_download_speed,
-        video_size: final_data.video_size,
-        video_duration_ms: final_data.video_duration_ms,
-        dropped_frames: Some(final_data.dropped_frames),
-        decoded_frames: Some(final_data.decoded_frames),
-        page_title: title,
-        screenshot,
-        error: if !final_data.play_success && final_data.first_play_time_ms.is_none() {
-            Some("视频未检测到播放事件（页面已加载）".to_string())
-        } else {
-            None
-        },
-    ..Default::default()
+        platform: platform.to_string(),
+        dns_time_ms: Some(dns.dns_time_ms), dns_success: dns.dns_success,
+        tcp_time_ms: Some(http.tcp_time_ms),
+        http_response_ms: Some(http.ttfb_ms),
+        play_success: false,
+        error: Some(msg.to_string()),
+        ..Default::default()
     }
 }
 
-/// 构建注入 JS — 使用配置的 CSS 选择器 + 多重 fallback
-fn build_inject_js(video_selector: &str, play_duration: Duration) -> String {
-    let play_ms = play_duration.as_millis();
-    let selector_escaped = video_selector.replace('\\', "\\\\").replace('\'', "\\'");
+// ─── JS 注入（同步 IIFE）─────────────────────────────
+
+/// 注入视频监听 — 同步 IIFE，不依赖 async evaluate
+fn build_inject_js_sync(video_selector: &str) -> String {
     format!(
         r#"
-(() => {{
-    // 多选择器 fallback：先试配置的，找不到再试通用 video
-    const selectors = ['{0}', 'video', '.video video', '#video', 'video.html5-main-video'];
-    let video = null;
-    for (const sel of selectors) {{
-        const el = document.querySelector(sel);
+(function() {{
+    var selectors = ['{0}', 'video', '.video video', '#video', 'video.html5-main-video'];
+    var video = null;
+    for (var i=0; i<selectors.length; i++) {{
+        var el = document.querySelector(selectors[i]);
         if (el && el.tagName === 'VIDEO') {{ video = el; break; }}
     }}
     if (!video) {{
-        // 找页面里所有 video 元素
-        const all = document.querySelectorAll('video');
+        var all = document.querySelectorAll('video');
         if (all.length > 0) video = all[0];
     }}
     if (!video) {{
-        window.__videoStats = {{ page_loaded: true, error: 'no_video_element', play_success: false }};
-        return {{ page_loaded: true, error: 'no_video_element' }};
+        window.__videoStats = {{ play_success: false, error: 'no_video_element' }};
+        return;
     }}
 
     window.__videoStats = {{
-        first_play_time_ms: null,
-        buffer_count: 0,
-        total_buffer_time_ms: 0,
-        play_success: false,
-        video_download_speed: null,
-        video_size: null,
-        video_duration_ms: null,
-        dropped_frames: 0,
-        decoded_frames: 0,
-        page_loaded: true,
-        _buffer_start: null,
-        _start_time: performance.now()
+        first_play_time_ms: null, buffer_count: 0, total_buffer_time_ms: 0,
+        play_success: false, video_download_speed: null, video_size: null,
+        video_duration_ms: null, dropped_frames: 0, decoded_frames: 0,
+        _buffer_start: null, _start_time: performance.now()
     }};
 
-    // 监听 playing 事件
-    video.addEventListener('playing', () => {{
-        if (window.__videoStats.first_play_time_ms === null) {{
-            window.__videoStats.first_play_time_ms = performance.now() - window.__videoStats._start_time;
-            window.__videoStats.play_success = true;
+    video.addEventListener('playing', function() {{
+        var s = window.__videoStats;
+        if (s.first_play_time_ms === null) {{
+            s.first_play_time_ms = performance.now() - s._start_time;
+            s.play_success = true;
         }}
-        if (window.__videoStats._buffer_start !== null) {{
-            window.__videoStats.total_buffer_time_ms += performance.now() - window.__videoStats._buffer_start;
-            window.__videoStats._buffer_start = null;
+        if (s._buffer_start !== null) {{
+            s.total_buffer_time_ms += performance.now() - s._buffer_start;
+            s._buffer_start = null;
         }}
     }});
 
-    video.addEventListener('waiting', () => {{
+    video.addEventListener('waiting', function() {{
         window.__videoStats.buffer_count++;
         window.__videoStats._buffer_start = performance.now();
     }});
 
-    video.addEventListener('loadedmetadata', () => {{
+    video.addEventListener('loadedmetadata', function() {{
         window.__videoStats.video_duration_ms = video.duration ? video.duration * 1000 : null;
     }});
 
-    // 延迟检测：如果 5 秒内已经播放过，标记为成功
-    setTimeout(() => {{
-        if (!window.__videoStats.play_success && !video.paused && video.currentTime > 0) {{
-            window.__videoStats.first_play_time_ms = performance.now() - window.__videoStats._start_time;
-            window.__videoStats.play_success = true;
-        }}
-    }}, 5000);
-
     // 尝试播放
-    video.play().catch(() => {{}});
-
-    // 采集资源大小
-    const resources = performance.getEntriesByType('resource');
-    let videoSize = 0;
-    for (const r of resources) {{
-        if (r.initiatorType === 'video' || r.initiatorType === 'xmlhttprequest' ||
-            r.name.includes('.mp4') || r.name.includes('.m3u8') || r.name.includes('.mpd') ||
-            r.name.includes('.flv')) {{
-            videoSize += r.transferSize || 0;
-        }}
-    }}
-    window.__videoStats.video_size = videoSize || null;
-
-    return {{ injected: true, video_tag: video.tagName }};
+    try {{ video.play(); }} catch(e) {{}}
 }})()
-"#, selector_escaped
+"#,
+        video_selector.replace('\'', "\\'")
     )
 }
 
-/// 采集最终数据的 JS — 主动查询 video 元素的实际状态
-fn build_collect_js(video_selector: &str) -> String {
-    let selector_escaped = video_selector.replace('\\', "\\\\").replace('\'', "\\'");
+/// 采集最终结果 — 同步查询
+fn build_collect_js_sync(video_selector: &str) -> String {
     format!(
         r#"
-(() => {{
+(function() {{
     if (!window.__videoStats) return {{ play_success: false }};
-    const s = window.__videoStats;
+    var s = window.__videoStats;
 
-    // 主动查询 video 元素当前状态（不依赖事件）
-    let video = null;
-    const selectors = ['{0}', 'video', '.video video', '#video', 'video.html5-main-video'];
-    for (const sel of selectors) {{
-        const el = document.querySelector(sel);
+    var video = null;
+    var selectors = ['{0}', 'video', '.video video', '#video', 'video.html5-main-video'];
+    for (var i=0; i<selectors.length; i++) {{
+        var el = document.querySelector(selectors[i]);
         if (el && el.tagName === 'VIDEO') {{ video = el; break; }}
     }}
     if (!video) {{
-        const all = document.querySelectorAll('video');
+        var all = document.querySelectorAll('video');
         if (all.length > 0) video = all[0];
     }}
 
     if (video) {{
-        // 实时检测：未暂停 + currentTime > 0 视为已播放
         if (!s.play_success && !video.paused && video.currentTime > 0) {{
             s.first_play_time_ms = performance.now() - s._start_time;
             s.play_success = true;
@@ -423,13 +269,22 @@ fn build_collect_js(video_selector: &str) -> String {
         }}
         if (video.webkitDecodedFrameCount !== undefined) s.decoded_frames = video.webkitDecodedFrameCount;
         if (video.webkitDroppedFrameCount !== undefined) s.dropped_frames = video.webkitDroppedFrameCount;
-
-        // 二次尝试：currentTime 已经是 > 0 但 paused 状态为 true 也算有播放过
         if (!s.play_success && video.currentTime > 0.5) {{
             s.first_play_time_ms = performance.now() - s._start_time;
             s.play_success = true;
         }}
     }}
+
+    // 采集资源大小
+    var resources = performance.getEntriesByType('resource');
+    var videoSize = 0;
+    for (var i=0; i<resources.length; i++) {{
+        if (resources[i].initiatorType === 'video' ||
+            resources[i].name.indexOf('.mp4') !== -1 || resources[i].name.indexOf('.m3u8') !== -1) {{
+            videoSize += resources[i].transferSize || 0;
+        }}
+    }}
+    s.video_size = videoSize || null;
 
     if (s.video_size && s.first_play_time_ms) {{
         s.video_download_speed = (s.video_size / 1024) / (s.first_play_time_ms / 1000);
@@ -447,11 +302,11 @@ fn build_collect_js(video_selector: &str) -> String {
         decoded_frames: s.decoded_frames
     }};
 }})()
-"#, selector_escaped
+"#,
+        video_selector.replace('\'', "\\'")
     )
 }
 
-/// JS 采集的数据
 #[derive(Debug, Default, Deserialize)]
 struct VideoJsData {
     #[serde(default)]
@@ -472,23 +327,4 @@ struct VideoJsData {
     dropped_frames: i32,
     #[serde(default)]
     decoded_frames: i32,
-}
-
-fn error_result(platform: &str, msg: &str) -> VideoTestResult {
-    VideoTestResult {
-        platform: platform.to_string(),
-        first_play_time_ms: None,
-        buffer_count: None,
-        total_buffer_time_ms: None,
-        play_success: false,
-        video_download_speed: None,
-        video_size: None,
-        video_duration_ms: None,
-        dropped_frames: None,
-        decoded_frames: None,
-        page_title: None,
-        screenshot: None,
-        error: Some(msg.to_string()),
-    ..Default::default()
-    }
 }
