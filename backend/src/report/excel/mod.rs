@@ -46,10 +46,8 @@ pub fn export_website_xlsx(
 
     // === 表头 ===
     let headers = [
-        "序号", "URL", "DNS解析时延(ms)", "DNS解析成功率(%)", "TCP连接时延(ms)", "TLS握手时延(ms)", "HTTP状态码",
-        "首包时延(ms)", "首屏时延(ms)", "FCP(ms)", "DOM加载(ms)", "Load事件(ms)",
-        "首页时延(ms)", "首次绘制(ms)", "访问成功率(%)", "最终URL",
-        "页面标题", "截图路径", "错误信息",
+        "序号", "URL", "DNS解析时延(ms)", "DNS解析成功率(%)", "TCP连接时延(ms)",
+        "访问成功率(%)", "首包时延(ms)", "首屏时延(ms)", "首页时延(ms)",
     ];
 
     for (col, h) in headers.iter().enumerate() {
@@ -67,21 +65,10 @@ pub fn export_website_xlsx(
         write_num(sheet, row, 2, r.dns_time_ms, row_fmt)?;
         write_ok(sheet, row, 3, r.dns_success, row_fmt)?;
         write_num(sheet, row, 4, r.tcp_time_ms, row_fmt)?;
-        write_num(sheet, row, 5, r.tls_time_ms, row_fmt)?;
-        write_num_i32(sheet, row, 6, r.http_status, row_fmt)?;
-        write_num(sheet, row, 7, r.ttfb_ms, row_fmt)?;
-        write_num(sheet, row, 8, r.fp_ms, row_fmt)?;
-        write_num(sheet, row, 9, r.fcp_ms, row_fmt)?;
-        write_num(sheet, row, 10, r.dom_content_loaded_ms, row_fmt)?;
-        write_num(sheet, row, 11, r.load_event_ms, row_fmt)?;
-        write_num(sheet, row, 12, r.page_open_time_ms, row_fmt)?;
-        write_num(sheet, row, 13, r.first_paint_ms, row_fmt)?;
-        write_num_i32(sheet, row, 14, r.resource_count, row_fmt)?;
-        write_num_i32(sheet, row, 15, r.resource_total_size, row_fmt)?;
-        sheet.write_with_format(row, 16, r.final_url.as_deref().unwrap_or("-"), row_fmt)?;
-        sheet.write_with_format(row, 17, r.page_title.as_deref().unwrap_or("-"), row_fmt)?;
-        sheet.write_with_format(row, 18, r.screenshot_path.as_deref().unwrap_or("-"), row_fmt)?;
-        sheet.write_with_format(row, 19, r.error_msg.as_deref().unwrap_or(""), if has_error { &fail_fmt } else { row_fmt })?;
+        write_success(sheet, row, 5, r.error_msg.is_none(), row_fmt)?;
+        write_num(sheet, row, 6, r.ttfb_ms, row_fmt)?;
+        write_num(sheet, row, 7, r.dom_content_loaded_ms, row_fmt)?;
+        write_num(sheet, row, 8, r.load_event_ms, row_fmt)?;
     }
 
     // === 自动列宽 ===
@@ -89,12 +76,7 @@ pub fn export_website_xlsx(
         let max_len = std::cmp::max(
             headers[col as usize].len() as u16,
             db_data.iter().fold(0u16, |acc, r| {
-                let s = match col {
-                    1 => r.url.len() as u16,
-                    17 => r.page_title.as_ref().map(|t| t.len() as u16).unwrap_or(0),
-                    19 => r.error_msg.as_ref().map(|e| e.len() as u16).unwrap_or(0),
-                    _ => 10,
-                };
+                let s = match col { 1 => r.url.len() as u16, _ => 10 };
                 acc.max(s)
             }),
         );
@@ -182,8 +164,7 @@ pub fn export_download_xlsx(
 
     let headers = [
         "序号", "URL", "文件DNS时延(ms)", "DNS解析成功率(%)", "文件TCP连接时延(ms)",
-        "文件下载速率(Mbps)", "平均速率(Mbps)", "峰值速率(Mbps)",
-        "下载耗时(ms)", "文件大小(B)", "文件下载成功率(%)", "错误",
+        "文件下载速率(Mbps)", "文件下载成功率(%)",
     ];
 
     for (col, h) in headers.iter().enumerate() {
@@ -197,13 +178,13 @@ pub fn export_download_xlsx(
 
         sheet.write_with_format(row, 0, (i + 1) as u32, rf)?;
         sheet.write_with_format(row, 1, &r.url, rf)?;
-        write_num(sheet, row, 2, r.download_speed, rf)?;
-        write_num(sheet, row, 3, r.avg_speed, rf)?;
-        write_num(sheet, row, 4, r.peak_speed, rf)?;
-        write_num(sheet, row, 5, r.download_time_ms, rf)?;
-        write_num_i32(sheet, row, 6, r.file_size, rf)?;
-        sheet.write_with_format(row, 7, if ok { "成功" } else { "失败" }, rf)?;
-        sheet.write_with_format(row, 8, r.error_msg.as_deref().unwrap_or(""), rf)?;
+        write_num(sheet, row, 2, r.dns_time_ms, rf)?;
+        write_ok(sheet, row, 3, r.dns_success, rf)?;
+        write_num(sheet, row, 4, r.tcp_time_ms, rf)?;
+        // KB/s → Mbps: ÷125
+        let speed_mbps = r.download_speed.map(|s| s / 125.0);
+        write_num(sheet, row, 5, speed_mbps, rf)?;
+        write_success(sheet, row, 6, ok, rf)?;
     }
 
     for col in 0..headers.len() as u16 {
@@ -283,6 +264,11 @@ fn write_ok(sheet: &mut Worksheet, row: u32, col: u16, val: Option<i32>, fmt: &F
     }
 }
 
+fn write_success(sheet: &mut Worksheet, row: u32, col: u16, ok: bool, fmt: &Format) -> Result<(), XlsxError> {
+    sheet.write_with_format(row, col, if ok { "100" } else { "0" }, fmt)?;
+    Ok(())
+}
+
 // === CSV / JSON 导出 ===
 
 pub fn export_csv<T: serde::Serialize>(data: &[T], task_id: &str, output_dir: &str, prefix: &str) -> anyhow::Result<String> {
@@ -355,9 +341,8 @@ pub fn export_plan_run_xlsx(
     if !website_data.is_empty() {
         let sheet = workbook.add_worksheet().set_name("网站测试")?;
         let headers = [
-            "URL", "DNS解析时延(ms)", "DNS解析成功率(%)", "TCP连接时延(ms)", "TLS握手时延(ms)",
-            "HTTP状态码", "首包时延(ms)", "首屏时延(FP)", "FCP(ms)", "DOM加载(ms)", "Load事件(ms)",
-            "首页打开(ms)", "资源数", "大小(B)", "页面标题", "错误",
+            "URL", "DNS解析时延(ms)", "DNS解析成功率(%)", "TCP连接时延(ms)",
+            "访问成功率(%)", "首包时延(ms)", "首屏时延(ms)", "首页时延(ms)",
         ];
         for (col, h) in headers.iter().enumerate() {
             sheet.write_with_format(0, col as u16, *h, &header_fmt)?;
@@ -368,22 +353,14 @@ pub fn export_plan_run_xlsx(
             let fmt = if has_err { &err_fmt } else { &ok_fmt };
             sheet.write_with_format(row, 0, &r.url, &url_fmt)?;
             write_num(sheet, row, 1, r.dns_time_ms, fmt)?;
-            write_num_i32(sheet, row, 2, r.dns_success, fmt)?;
+            write_ok(sheet, row, 2, r.dns_success, fmt)?;
             write_num(sheet, row, 3, r.tcp_time_ms, fmt)?;
-            write_num(sheet, row, 4, r.tls_time_ms, fmt)?;
-            write_num_i32(sheet, row, 5, r.http_status, fmt)?;
-            write_num(sheet, row, 6, r.ttfb_ms, fmt)?;
-            write_num(sheet, row, 7, r.fp_ms, fmt)?;
-            write_num(sheet, row, 8, r.fcp_ms, fmt)?;
-            write_num(sheet, row, 9, r.dom_content_loaded_ms, fmt)?;
-            write_num(sheet, row, 10, r.load_event_ms, fmt)?;
-            write_num(sheet, row, 11, r.page_open_time_ms, fmt)?;
-            write_num_i32(sheet, row, 12, r.resource_count, fmt)?;
-            write_num_i32(sheet, row, 13, r.resource_total_size, fmt)?;
-            sheet.write_with_format(row, 14, r.page_title.as_deref().unwrap_or("-"), fmt)?;
-            sheet.write_with_format(row, 15, r.error_msg.as_deref().unwrap_or(""), fmt)?;
+            write_success(sheet, row, 4, !has_err, fmt)?;
+            write_num(sheet, row, 5, r.ttfb_ms, fmt)?;
+            write_num(sheet, row, 6, r.dom_content_loaded_ms, fmt)?;
+            write_num(sheet, row, 7, r.load_event_ms, fmt)?;
         }
-        for col in 0..headers.len() as u16 { sheet.set_column_width(col, 16.0)?; }
+        for col in 0..headers.len() as u16 { sheet.set_column_width(col, 18.0)?; }
         sheet.set_freeze_panes(1, 0)?;
     }
 
@@ -429,9 +406,8 @@ pub fn export_plan_run_xlsx(
     if !download_data.is_empty() {
         let sheet = workbook.add_worksheet().set_name("下载测试")?;
         let headers = [
-            "URL", "DNS时延(ms)", "DNS成功率(%)", "TCP时延(ms)",
-            "下载速率(KB/s)", "平均速率(KB/s)", "峰值速率(KB/s)",
-            "下载耗时(ms)", "文件大小(B)", "下载结果", "错误",
+            "URL", "文件DNS时延(ms)", "DNS解析成功率(%)", "文件TCP连接时延(ms)",
+            "文件下载速率(Mbps)", "文件下载成功率(%)",
         ];
         for (col, h) in headers.iter().enumerate() {
             sheet.write_with_format(0, col as u16, *h, &header_fmt)?;
@@ -442,17 +418,13 @@ pub fn export_plan_run_xlsx(
             let fmt = if ok { &ok_fmt } else { &err_fmt };
             sheet.write_with_format(row, 0, &r.url, &url_fmt)?;
             write_num(sheet, row, 1, r.dns_time_ms, fmt)?;
-            write_num_i32(sheet, row, 2, r.dns_success, fmt)?;
+            write_ok(sheet, row, 2, r.dns_success, fmt)?;
             write_num(sheet, row, 3, r.tcp_time_ms, fmt)?;
-            write_num(sheet, row, 4, r.download_speed, fmt)?;
-            write_num(sheet, row, 5, r.avg_speed, fmt)?;
-            write_num(sheet, row, 6, r.peak_speed, fmt)?;
-            write_num(sheet, row, 7, r.download_time_ms, fmt)?;
-            write_num_i32(sheet, row, 8, r.file_size, fmt)?;
-            sheet.write_with_format(row, 9, if ok { "成功" } else { "失败" }, fmt)?;
-            sheet.write_with_format(row, 10, r.error_msg.as_deref().unwrap_or(""), fmt)?;
+            let speed_mbps = r.download_speed.map(|s| s / 125.0);
+            write_num(sheet, row, 4, speed_mbps, fmt)?;
+            write_success(sheet, row, 5, ok, fmt)?;
         }
-        for col in 0..headers.len() as u16 { sheet.set_column_width(col, 16.0)?; }
+        for col in 0..headers.len() as u16 { sheet.set_column_width(col, 18.0)?; }
         sheet.set_freeze_panes(1, 0)?;
     }
 

@@ -138,26 +138,18 @@ const stClass = (s: string) => `st st-${s}`
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
-            <th>URL</th><th>DNS解析时延(ms)</th><th>DNS解析成功率(%)</th><th>TCP连接时延(ms)</th><th>TLS握手时延(ms)</th><th>HTTP状态码</th><th>首包时延(ms)</th><th>首屏时延(FP)</th><th>FCP(ms)</th><th>DOM加载(ms)</th><th>Load事件(ms)</th><th>首页打开(ms)</th><th>资源数</th><th>大小(B)</th><th>页面标题</th><th>错误</th>
+            <th>URL</th><th>DNS解析时延(ms)</th><th>DNS解析成功率(%)</th><th>TCP连接时延(ms)</th><th>访问成功率(%)</th><th>首包时延(ms)</th><th>首屏时延(ms)</th><th>首页时延(ms)</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in websiteResults" :key="r.id">
               <td class="url-cell">{{ r.url }}</td>
               <td>{{ r.dns_time_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.dns_success !== null ? (r.dns_success === 1 ? '100' : '0') : '-' }}</td>
+              <td>{{ r.dns_success === 1 ? '100' : '0' }}</td>
               <td>{{ r.tcp_time_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.tls_time_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.http_status ?? '-' }}</td>
+              <td>{{ r.error_msg ? '0' : '100' }}</td>
               <td>{{ r.ttfb_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.fp_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.fcp_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.dom_content_loaded_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.load_event_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.page_open_time_ms?.toFixed(0) ?? '-' }}</td>
-              <td>{{ r.resource_count ?? '-' }}</td>
-              <td>{{ r.resource_total_size ?? '-' }}</td>
-              <td class="title-cell">{{ r.page_title || '-' }}</td>
-              <td class="err-cell">{{ r.error_msg || '-' }}</td>
             </tr>
           </tbody>
         </table>
@@ -199,23 +191,16 @@ const stClass = (s: string) => `st st-${s}`
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
-            <th>URL</th><th>文件DNS时延(ms)</th><th>DNS解析成功率(%)</th><th>文件TCP连接时延(ms)</th><th>文件下载速率(Mbps)</th><th>平均速率(Mbps)</th><th>峰值速率(Mbps)</th><th>下载耗时(ms)</th><th>文件大小</th><th>文件下载成功率(%)</th>
+            <th>URL</th><th>文件DNS时延(ms)</th><th>文件DNS解析成功率(%)</th><th>文件TCP连接时延(ms)</th><th>文件下载速率(Mbps)</th><th>文件下载成功率(%)</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in downloadResults" :key="r.id">
               <td class="url-cell">{{ r.url }}</td>
               <td>{{ r.dns_time_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.dns_success !== null ? (r.dns_success === 1 ? '100' : '0') : '-' }}</td>
+              <td>{{ r.dns_success === 1 ? '100' : '0' }}</td>
               <td>{{ r.tcp_time_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.download_speed ? (r.download_speed / 1024).toFixed(2) : '-' }}</td>
-              <td>{{ r.avg_speed ? (r.avg_speed / 1024).toFixed(2) : '-' }}</td>
-              <td>{{ r.peak_speed ? (r.peak_speed / 1024).toFixed(2) : '-' }}</td>
-              <td>{{ r.download_time_ms?.toFixed(0) ?? '-' }}</td>
-              <td>{{ r.file_size ? formatFileSize(r.file_size) : '-' }}</td>
-              <td>{{ r.success !== null ? (r.success === 1 ? '100' : '0') : '-' }}</td>
-              <td>{{ r.download_time_ms?.toFixed(0) ?? '-' }}</td>
-              <td>{{ r.file_size ? formatFileSize(r.file_size) : '-' }}</td>
-              <td><span :class="r.success===1 ? 'badge ok' : 'badge err'">{{ r.success===1 ? '成功' : '失败' }}</span></td>
+              <td>{{ r.download_speed ? (r.download_speed / 125).toFixed(2) : '-' }}</td>
+              <td>{{ r.success === 1 ? '100' : '0' }}</td>
             </tr>
           </tbody>
         </table>
