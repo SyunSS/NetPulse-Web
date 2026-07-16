@@ -45,16 +45,23 @@ function parseAndImport(text: string, filename: string) {
   if (lines.length === 0) { message.warning('文件中没有找到 URL'); return }
 
   // 自动分组：按 task_type 标题行分组
-  const groups: Record<string, string[]> = { website: [], video: [], download: [] }
+  const groups: Record<string, string[]> = { website: [], video: [], download: [], ping: [] }
   let currentType = 'website'
 
   for (const line of lines) {
     if (line.startsWith('[website]') || line === '网站测试') { currentType = 'website'; continue }
     if (line.startsWith('[video]') || line === '视频测试') { currentType = 'video'; continue }
     if (line.startsWith('[download]') || line === '下载测试') { currentType = 'download'; continue }
-    // URL 匹配
-    if (line.startsWith('http://') || line.startsWith('https://')) {
-      groups[currentType].push(line)
+    if (line.startsWith('[ping]') || line === 'Ping测试' || line === 'ping') { currentType = 'ping'; continue }
+    // URL 匹配：ping 也接受纯域名/IP，其他类型只接受 http(s)
+    if (currentType === 'ping') {
+      if (line.startsWith('http://') || line.startsWith('https://') || /^[\w.-]+(\.[\w.-]+)+(:\d+)?/.test(line)) {
+        groups.ping.push(line)
+      }
+    } else {
+      if (line.startsWith('http://') || line.startsWith('https://')) {
+        groups[currentType].push(line)
+      }
     }
   }
 
@@ -107,6 +114,36 @@ const currentCron = computed(() => {
 })
 
 const nextRunPreview = ref<string | null>(null)
+
+function downloadPlanTemplate() {
+  const template = `\
+// NetPulse 测试计划导入模板
+// 用 [类型] 标记分组，下面放 URL 列表，每行一个
+// ping 支持纯域名或 IP，其他类型请用完整 http(s) URL
+
+[website]
+https://www.baidu.com
+https://github.com
+
+[video]
+https://www.bilibili.com/video/BV1GJ411x7h7
+
+[download]
+http://speedtest.tele2.net/1MB.zip
+
+[ping]
+lobby-prod-b.df.qq.com
+receiver.tdm.qq.com
+1.1.1.1:443
+`
+  const blob = new Blob([template], { type: 'text/plain' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = 'netpulse-plan-template.txt'
+  a.click()
+  URL.revokeObjectURL(a.href)
+  message.success('模板已下载: netpulse-plan-template.txt')
+}
 
 function addItem() {
   items.value.push({
@@ -349,6 +386,7 @@ onMounted(() => {
           <div style="display:flex;gap:8px">
             <input type="file" ref="fileInput" accept=".txt,.csv" style="display:none" @change="handleFileImport" />
             <button class="action-btn" @click="fileInput?.click()">📄 导入文件</button>
+            <button class="action-btn" @click="downloadPlanTemplate">📥 下载模板</button>
             <button class="add-item-btn" @click="addItem">+ 添加测试项</button>
           </div>
         </div>
