@@ -236,7 +236,47 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "video_result", "test_count", "INTEGER DEFAULT 1").await?;
     add_column_if_missing(pool, "ping_result", "test_count", "INTEGER DEFAULT 1").await?;
 
+    // 兜底：确保计划相关表一定存在（老数据库可能缺少）
+    create_table_if_missing(pool, "task_plans",
+        "CREATE TABLE IF NOT EXISTS task_plans (\
+            id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT,\
+            cron_expression TEXT, enabled INTEGER DEFAULT 1, last_run_at TEXT, next_run_at TEXT,\
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,\
+            FOREIGN KEY (user_id) REFERENCES users(id))"
+    ).await?;
+    create_table_if_missing(pool, "task_plan_items",
+        "CREATE TABLE IF NOT EXISTS task_plan_items (\
+            id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, task_type TEXT NOT NULL,\
+            urls TEXT NOT NULL, options TEXT, repeat_count INTEGER DEFAULT 1,\
+            engine TEXT DEFAULT 'headless_chrome', order_index INTEGER DEFAULT 0,\
+            created_at TEXT NOT NULL,\
+            FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE)"
+    ).await?;
+    create_table_if_missing(pool, "task_plan_runs",
+        "CREATE TABLE IF NOT EXISTS task_plan_runs (\
+            id TEXT PRIMARY KEY, plan_id TEXT NOT NULL,\
+            task_ids TEXT NOT NULL DEFAULT '[]', triggered_by TEXT NOT NULL,\
+            started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL,\
+            created_at TEXT NOT NULL,\
+            FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE)"
+    ).await?;
+
     info!("数据库迁移完成（{} 张表）", 11);
+    Ok(())
+}
+
+/// 安全地创建表（如果表不存在）
+async fn create_table_if_missing(pool: &SqlitePool, table: &str, create_sql: &str) -> anyhow::Result<()> {
+    let exists: i32 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+    )
+    .bind(table)
+    .fetch_one(pool)
+    .await?;
+    if exists == 0 {
+        sqlx::query(create_sql).execute(pool).await?;
+        info!("增量迁移: 创建表 {}", table);
+    }
     Ok(())
 }
 
