@@ -6,6 +6,7 @@ import { taskApi, type TestTask, type WebsiteResult, type VideoResult, type Down
 import { getWsClient, type ProgressMessage } from '@/api/ws'
 import { useAuthStore } from '@/stores/auth'
 import { formatMs, formatFileSize, formatTime } from '@/utils'
+import http from '@/api/index'
 
 const route = useRoute()
 const router = useRouter()
@@ -59,6 +60,16 @@ function handleWsMessage(msg: ProgressMessage) {
   if (['url_completed','task_completed','task_failed'].includes(msg.type)) fetchData()
 }
 
+async function handleDelete(force?: boolean) {
+  const msg = force ? '强制删除此任务及所有结果？' : '确认删除此任务？'
+  if (!confirm(msg)) return
+  try {
+    const url = force ? `/task/${taskId}?force=true` : `/task/${taskId}`
+    await http.delete(url)
+    router.push('/')
+  } catch (e: any) { message.error(e.message || '删除失败') }
+}
+
 async function handleExport(format: string) {
   try {
     const resp = await fetch(`/api/task/${taskId}/export?format=${format}`, {
@@ -97,7 +108,9 @@ const stClass = (s: string) => `st st-${s}`
       </div>
       <div class="header-actions">
         <button v-if="task && (task.status==='pending'||task.status==='running')" class="btn warning" @click="taskApi.cancel(taskId).then(fetchData)">取消任务</button>
+        <button v-if="task && task.status==='running'" class="btn danger" @click="handleDelete(true)">强制删除</button>
         <button v-if="task && ['completed','failed','cancelled'].includes(task.status)" class="btn primary" @click="taskApi.retry(taskId).then(r=>router.push('/task/'+r.data.task_id))">重新测试</button>
+        <button v-if="task && !['pending','running'].includes(task.status)" class="btn danger" @click="handleDelete()">删除</button>
         <div v-if="task?.status==='completed'" style="display:flex;gap:6px">
           <button class="btn" @click="handleExport('xlsx')">📥 Excel</button>
           <button class="btn" @click="handleExport('csv')">📥 CSV</button>
