@@ -321,11 +321,51 @@ async fn export_plan_run(
             let mut buf = Vec::new();
             {
                 let mut wtr = csv::Writer::from_writer(&mut buf);
-                wtr.write_record(&["task_type", "task_id", "status", "url", "extra"])
-                    .map_err(|e| AppError::internal(&e.to_string()))?;
+                // 梗概
+                wtr.write_record(&["=== 任务梗概 ==="]).ok();
+                wtr.write_record(&["task_type", "task_id", "status", "url"]).ok();
                 for s in &task_summaries {
-                    wtr.write_record(&[&s.task_type, &s.task_id, &s.status, &s.url, ""])
-                        .map_err(|e| AppError::internal(&e.to_string()))?;
+                    wtr.write_record(&[&s.task_type, &s.task_id, &s.status, &s.url]).ok();
+                }
+                // 网站结果
+                if !website_data.is_empty() {
+                    wtr.write_record(&[""]).ok();
+                    wtr.write_record(&["=== 网站测试结果 ==="]).ok();
+                    wtr.write_record(&["URL","DNS时延","TCP时延","TLS时延","HTTP状态","TTFB","DOM加载","Load事件","总请求","HTML(B)","CSS(B)","JS(B)","图片(B)","字体(B)"]).ok();
+                    for r in &website_data {
+                        wtr.serialize((
+                            &r.url, r.dns_time_ms, r.tcp_time_ms, r.tls_time_ms, r.http_status,
+                            r.ttfb_ms, r.dom_content_loaded_ms, r.load_event_ms,
+                            r.total_requests, r.html_size, r.css_size, r.js_size, r.image_size, r.font_size,
+                        )).ok();
+                    }
+                }
+                // 视频结果
+                if !video_data.is_empty() {
+                    wtr.write_record(&[""]).ok();
+                    wtr.write_record(&["=== 视频测试结果 ==="]).ok();
+                    wtr.write_record(&["URL","平台","DNS时延","播放成功","首次播放时延","缓冲次数","丢帧","解码帧"]).ok();
+                    for r in &video_data {
+                        wtr.serialize((&r.url, r.dns_time_ms, r.play_success, r.first_play_time_ms, r.buffer_count, r.dropped_frames, r.decoded_frames)).ok();
+                    }
+                }
+                // 下载结果
+                if !download_data.is_empty() {
+                    wtr.write_record(&[""]).ok();
+                    wtr.write_record(&["=== 下载测试结果 ==="]).ok();
+                    wtr.write_record(&["URL","DNS时延","TCP时延","下载速度(KB/s)","耗时(ms)","大小(B)","成功"]).ok();
+                    for r in &download_data {
+                        wtr.serialize((&r.url, r.dns_time_ms, r.tcp_time_ms, r.download_speed, r.download_time_ms, r.file_size, r.success)).ok();
+                    }
+                }
+                // Ping结果
+                if !ping_data.is_empty() {
+                    wtr.write_record(&[""]).ok();
+                    wtr.write_record(&["=== Ping测试结果 ==="]).ok();
+                    wtr.write_record(&["目标","方式","时延(ms)","丢包率(%)","抖动(ms)","成功"]).ok();
+                    for r in &ping_data {
+                        wtr.serialize((&r.host, &r.method, r.avg_latency_ms, r.packet_loss_rate, r.jitter_ms, r.success)).ok();
+                    }
                 }
                 wtr.flush().map_err(|e| AppError::internal(&e.to_string()))?;
             }

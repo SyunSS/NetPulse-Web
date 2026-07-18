@@ -66,12 +66,19 @@ impl NetworkCollector {
 
     pub fn collect_js() -> &'static str {
         r#"JSON.stringify((function(){
+            var r = { count: 0, total: 0, html: 0, css: 0, js: 0, img: 0, font: 0, media: 0, failed: 0 };
+            // 主页面 HTML (navigation entry)
+            var nav = performance.getEntriesByType('navigation');
+            if (nav.length > 0) {
+                var s = nav[0].transferSize || nav[0].encodedBodySize || 0;
+                r.html += s; r.total += s; r.count++;
+            }
+            // 其他资源
             var res = performance.getEntriesByType('resource');
-            var r = { count: res.length, total: 0, html: 0, css: 0, js: 0, img: 0, font: 0, media: 0, failed: 0 };
             for (var i=0; i<res.length; i++) {
                 var e = res[i];
                 var s = e.transferSize || e.encodedBodySize || 0;
-                r.total += s;
+                r.total += s; r.count++;
                 if (/\.html|\.htm|text\/html/.test(e.name)) r.html += s;
                 else if (/\.css|text\/css/.test(e.name)) r.css += s;
                 else if (/\.js|text\/javascript/.test(e.name)) r.js += s;
