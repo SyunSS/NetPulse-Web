@@ -1,7 +1,7 @@
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::header;
 use axum::response::Response;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Json;
 use axum::Router;
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,7 @@ pub fn task_routes() -> Router<AppState> {
         .route("/:id/export", get(export_result))
         .route("/:id/cancel", post(cancel_task))
         .route("/:id/retry", post(retry_task))
+        .route("/:id", delete(delete_task))
         .route("/import", post(import_tasks))
         .route("/template", get(download_template))
 }
@@ -387,4 +388,30 @@ fn file_response(bytes: Vec<u8>, content_type: &str, filename: &str) -> Response
         .header(header::CONTENT_DISPOSITION, format!("attachment; filename={}", filename))
         .body(axum::body::Body::from(bytes))
         .unwrap()
+}
+
+/// 硬删除任务（仅 completed/failed/cancelled 可删除）
+async fn delete_task(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(task_id): Path<String>,
+) -> Result<Json<crate::utils::response::ApiResponse<()>>, AppError> {
+    let task = TaskService::get_task(&state.db, &task_id).await
+        .map_err(|_| AppError::not_found("任务不存在"))?;
+    if task.user_id != claims.sub {
+        return Err(AppError::unauthorized("无权删除"));
+    }
+    if task.status == "pending" || task.status == "running" {
+        return Err(AppError::bad_request("请先取消运行中的任务再删除"));
+    }
+    // 删关联数据
+    sqlx::query("DELETE FROM website_result WHERE task_id = ?").bind(&task_id).execute(&state.db).await.ok();
+    sqlx::query("DELETE FROM video_result WHERE task_id = ?").bind(&task_id).execute(&state.db).await.ok();
+    sqlx::query("DELETE FROM download_result WHERE task_id = ?").bind(&task_id).execute(&state.db).await.ok();
+    sqlx::query("DELETE FROM ping_result WHERE task_id = ?").bind(&task_id).execute(&state.db).await.ok();
+    sqlx::query("DELETE FROM task_log WHERE task_id = ?").bind(&task_id).execute(&state.db).await.ok();
+    sqlx::query("DELETE FROM task_metric_config WHERE task_id = ?").bind(&task_id).execute(&state.db).await.ok();
+    sqlx::query("DELETE FROM test_task WHERE id = ?").bind(&task_id).execute(&state.db).await
+        .map_err(|e| AppError::internal(&e.to_string()))?;
+    Ok(Json(ok_with_msg("任务已删除", ())))
 }

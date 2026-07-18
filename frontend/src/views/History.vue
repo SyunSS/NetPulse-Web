@@ -47,6 +47,25 @@ const filteredTasks = () => {
     return true
   })
 }
+
+async function handleDelete(taskId: string, _type: string) {
+  if (!confirm('确认删除此任务及所有关联结果？')) return
+  try {
+    await (await import('@/api/index')).default.delete(`/task/${taskId}`)
+    fetchTasks()
+  } catch (e: any) {
+    alert(e.message || '删除失败')
+  }
+}
+
+async function handleCancel(taskId: string) {
+  try {
+    await taskApi.cancel(taskId)
+    fetchTasks()
+  } catch (e: any) {
+    alert(e.message || '取消失败')
+  }
+}
 </script>
 
 <template>
@@ -102,6 +121,10 @@ const filteredTasks = () => {
             <td>{{ formatTime(t.created_at) }}</td>
             <td>
               <button class="link" @click="router.push('/task/'+t.id)">查看</button>
+              <button v-if="t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled'"
+                class="link danger" @click="handleDelete(t.id, t.task_type)">删除</button>
+              <button v-if="t.status === 'running' || t.status === 'pending'"
+                class="link" @click="handleCancel(t.id)">停止</button>
             </td>
           </tr>
         </tbody>
@@ -149,6 +172,7 @@ const filteredTasks = () => {
 .st-cancelled { background: rgba(240,160,32,.15); color: var(--color-warning); }
 
 .link { background: none; border: none; color: var(--color-primary); cursor: pointer; font-size: 13px; padding: 0; }
+.link.danger { color: var(--color-danger); margin-left: 8px; }
 .link:hover { text-decoration: underline; }
 
 .pagination { display: flex; align-items: center; justify-content: center; gap: 12px; padding-top: 16px; }

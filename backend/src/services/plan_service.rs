@@ -422,6 +422,16 @@ impl PlanService {
         if plan.user_id != user_id {
             anyhow::bail!("无权删除");
         }
+        // 禁止删除运行中的记录
+        let run: crate::models::plan::TaskPlanRun = sqlx::query_as(
+            "SELECT * FROM task_plan_runs WHERE id = ? AND plan_id = ?"
+        )
+        .bind(run_id).bind(plan_id)
+        .fetch_optional(db).await?
+        .ok_or_else(|| anyhow::anyhow!("运行记录不存在"))?;
+        if run.status == "running" || run.status == "pending" {
+            anyhow::bail!("请等待任务完成后再删除运行记录");
+        }
         sqlx::query("DELETE FROM task_plan_runs WHERE id = ? AND plan_id = ?")
             .bind(run_id)
             .bind(plan_id)

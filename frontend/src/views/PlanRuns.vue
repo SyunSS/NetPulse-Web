@@ -195,7 +195,8 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
           <div class="run-status-row">
             <span class="status-tag" :class="`status-${run.status}`">{{ statusText(run.status) }}</span>
             <span class="task-progress" v-if="run.task_count > 0">({{ run.completed_count }}/{{ run.task_count }})</span>
-            <button class="btn-icon danger" @click="handleDelete(run.id)" title="删除">🗑</button>
+            <button class="btn-icon danger" @click="handleDelete(run.id)" title="删除"
+              :disabled="run.status === 'running'">🗑</button>
           </div>
         </div>
 
