@@ -22,11 +22,8 @@ pub struct PingEngine {
 }
 
 impl PingEngine {
-    pub fn new(timeout: Duration) -> Self {
-        Self {
-            count: 10,
-            timeout,
-        }
+    pub fn new(count: u32, timeout: Duration) -> Self {
+        Self { count: count.max(1).min(100), timeout }
     }
 
     /// 执行 ping 测试

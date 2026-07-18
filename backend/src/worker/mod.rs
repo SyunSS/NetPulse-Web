@@ -172,6 +172,11 @@ fn parse_metrics(options: &serde_json::Value) -> Vec<String> {
         .unwrap_or_else(|| vec!["basic".into(), "page".into(), "resource".into()])
 }
 
+/// 从 job options 中提取 ping_count，默认 10
+fn parse_ping_count(options: &serde_json::Value) -> u32 {
+    options.get("ping_count").and_then(|v| v.as_u64()).map(|v| v as u32).unwrap_or(10)
+}
+
 /// 检查是否启用了某类指标
 fn metric_enabled(metrics: &[String], category: &str) -> bool {
     metrics.iter().any(|m| m == category || m == "all")
@@ -749,10 +754,11 @@ async fn run_ping_task(
     let task_id = &job.task_id;
     let total = job.urls.len();
     let timeout = Duration::from_secs(config.task.timeout_seconds);
+    let ping_count = parse_ping_count(&job.options);
 
     update_task_status(&db, task_id, "running", None).await?;
     let _ = progress_tx.send(ProgressMessage::TaskStarted { task_id: task_id.clone(), total_urls: total });
-    log_progress(&progress_tx, task_id, "info", &format!("开始 Ping 测试 {} 个目标", total));
+    log_progress(&progress_tx, task_id, "info", &format!("开始 Ping 测试 {} 个目标 (每目标 {} 个包)", total, ping_count));
 
     let mut success_count = 0usize;
     let mut fail_count = 0usize;
@@ -762,7 +768,7 @@ async fn run_ping_task(
             task_id: task_id.clone(), url: host.clone(), current: i + 1, total,
         });
 
-        let engine = PingEngine::new(timeout);
+        let engine = PingEngine::new(ping_count, timeout);
         let result = engine.test_ping(host).await;
 
         let now = Utc::now().to_rfc3339();

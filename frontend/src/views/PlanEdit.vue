@@ -440,6 +440,11 @@ onMounted(() => {
               </select>
               <label class="repeat-label">重复次数:</label>
               <input v-model.number="item.repeat_count" type="number" min="1" max="100" class="repeat-input" />
+              <label v-if="item.task_type==='ping'" class="repeat-label">发包数:</label>
+              <input v-if="item.task_type==='ping'"
+                :value="(item.options as any)?.ping_count ?? 10"
+                @input="(e: any) => { const v = parseInt(e.target.value)||10; (item.options as any).ping_count = v }"
+                type="number" min="1" max="100" class="repeat-input" />
               <select v-model="item.engine" class="engine-select" v-if="item.task_type === 'website' || item.task_type === 'video'">
                 <option value="headless_chrome">headless_chrome</option>
                 <option value="chromiumoxide">chromiumoxide (预留)</option>
