@@ -155,13 +155,15 @@ async fn list_plan_runs(
     Ok(Json(ok(runs)))
 }
 
-/// 删除一条计划运行记录
+/// 删除一条计划运行记录 (?force=true 强制删除运行中的)
 async fn delete_plan_run(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Path((plan_id, run_id)): Path<(String, String)>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<crate::utils::response::ApiResponse<()>>, AppError> {
-    PlanService::delete_plan_run(&state.db, &claims.sub, &plan_id, &run_id)
+    let force = params.get("force").map(|s| s.as_str()) == Some("true");
+    PlanService::delete_plan_run(&state.db, &claims.sub, &plan_id, &run_id, force)
         .await
         .map_err(|e| AppError::bad_request(&e.to_string()))?;
     Ok(Json(ok_with_msg("运行记录已删除", ())))

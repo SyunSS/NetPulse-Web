@@ -412,6 +412,7 @@ impl PlanService {
         user_id: &str,
         plan_id: &str,
         run_id: &str,
+        force: bool,
     ) -> anyhow::Result<()> {
         // 校验权限
         let plan = sqlx::query_as::<_, TaskPlan>("SELECT * FROM task_plans WHERE id = ?")
@@ -422,15 +423,26 @@ impl PlanService {
         if plan.user_id != user_id {
             anyhow::bail!("无权删除");
         }
-        // 禁止删除运行中的记录
         let run: crate::models::plan::TaskPlanRun = sqlx::query_as(
             "SELECT * FROM task_plan_runs WHERE id = ? AND plan_id = ?"
         )
         .bind(run_id).bind(plan_id)
         .fetch_optional(db).await?
         .ok_or_else(|| anyhow::anyhow!("运行记录不存在"))?;
-        if run.status == "running" || run.status == "pending" {
-            anyhow::bail!("请等待任务完成后再删除运行记录");
+
+        if !force && (run.status == "running" || run.status == "pending") {
+            anyhow::bail!("请等待任务完成后再删除，或使用强制删除");
+        }
+
+        // 强制模式: 先把仍在运行的 task 标记为 cancelled
+        if force && !run.task_ids.is_empty() {
+            if let Ok(task_ids) = serde_json::from_str::<Vec<String>>(&run.task_ids) {
+                for tid in &task_ids {
+                    let _ = sqlx::query(
+                        "UPDATE test_task SET status='cancelled', finished_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('pending','running')"
+                    ).bind(tid).execute(db).await;
+                }
+            }
         }
         sqlx::query("DELETE FROM task_plan_runs WHERE id = ? AND plan_id = ?")
             .bind(run_id)

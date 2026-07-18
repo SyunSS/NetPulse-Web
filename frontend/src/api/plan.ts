@@ -127,9 +127,10 @@ export const planApi = {
     )
   },
 
-  deleteRun(planId: string, runId: string) {
-    return http.post<unknown, { code: number; msg: string; data: null }>(
-      `/plan/${planId}/run/${runId}/delete`,
-    )
+  deleteRun(planId: string, runId: string, force = false) {
+    const url = force
+      ? `/plan/${planId}/run/${runId}/delete?force=true`
+      : `/plan/${planId}/run/${runId}/delete`
+    return http.post<unknown, { code: number; msg: string; data: null }>(url)
   },
 }

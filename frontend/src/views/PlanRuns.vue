@@ -83,10 +83,13 @@ function resetSearch() {
   fetchRuns()
 }
 
-async function handleDelete(runId: string) {
-  if (!confirm('确认删除这条运行记录？关联的 task 不会删除。')) return
+async function handleDelete(runId: string, force = false) {
+  const msg = force
+    ? '强制停止并删除此次运行？仍在运行的任务会被取消。'
+    : '确认删除这条运行记录？'
+  if (!confirm(msg)) return
   try {
-    await planStore.deleteRun(planId, runId)
+    await planStore.deleteRun(planId, runId, force)
     message.success('已删除')
     fetchRuns()
   } catch (e: any) {
@@ -195,8 +198,8 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
           <div class="run-status-row">
             <span class="status-tag" :class="`status-${run.status}`">{{ statusText(run.status) }}</span>
             <span class="task-progress" v-if="run.task_count > 0">({{ run.completed_count }}/{{ run.task_count }})</span>
-            <button class="btn-icon danger" @click="handleDelete(run.id)" title="删除"
-              :disabled="run.status === 'running'">🗑</button>
+            <button v-if="run.status !== 'running'" class="btn-icon danger" @click="handleDelete(run.id)" title="删除">🗑</button>
+            <button v-if="run.status === 'running'" class="btn-icon danger" @click="handleDelete(run.id, true)" title="强制停止并删除">⛔</button>
           </div>
         </div>
 

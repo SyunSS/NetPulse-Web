@@ -51,8 +51,8 @@ export const usePlanStore = defineStore('plan', () => {
     return res.data
   }
 
-  async function deleteRun(planId: string, runId: string) {
-    await planApi.deleteRun(planId, runId)
+  async function deleteRun(planId: string, runId: string, force = false) {
+    await planApi.deleteRun(planId, runId, force)
   }
 
   return {
