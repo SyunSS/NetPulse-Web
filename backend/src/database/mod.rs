@@ -224,6 +224,42 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             FOREIGN KEY (task_id) REFERENCES test_task(id)
         );
         "#,
+        // metric_definition 表
+        r#"
+        CREATE TABLE IF NOT EXISTS metric_definition (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            collector TEXT NOT NULL,
+            description TEXT,
+            cost_level TEXT DEFAULT 'low',
+            default_enable INTEGER DEFAULT 1
+        );
+        "#,
+        // metric_profile 表
+        r#"
+        CREATE TABLE IF NOT EXISTS metric_profile (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            metric_ids TEXT NOT NULL DEFAULT '[]',
+            user_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        "#,
+        // task_metric_config 表
+        r#"
+        CREATE TABLE IF NOT EXISTS task_metric_config (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            metric_ids TEXT NOT NULL DEFAULT '[]',
+            profile_id TEXT,
+            FOREIGN KEY (task_id) REFERENCES test_task(id)
+        );
+        "#,
     ];
 
     for sql in migrations {
@@ -261,7 +297,30 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE)"
     ).await?;
 
-    info!("数据库迁移完成（{} 张表）", 11);
+    // 兜底：确保 metric 表也存在
+    create_table_if_missing(pool, "metric_definition",
+        "CREATE TABLE IF NOT EXISTS metric_definition (\
+            id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,\
+            category TEXT NOT NULL, collector TEXT NOT NULL, description TEXT,\
+            cost_level TEXT DEFAULT 'low', default_enable INTEGER DEFAULT 1)"
+    ).await?;
+    create_table_if_missing(pool, "metric_profile",
+        "CREATE TABLE IF NOT EXISTS metric_profile (\
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT,\
+            metric_ids TEXT NOT NULL DEFAULT '[]', user_id TEXT NOT NULL,\
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,\
+            FOREIGN KEY (user_id) REFERENCES users(id))"
+    ).await?;
+    create_table_if_missing(pool, "task_metric_config",
+        "CREATE TABLE IF NOT EXISTS task_metric_config (\
+            id TEXT PRIMARY KEY, task_id TEXT NOT NULL, metric_ids TEXT NOT NULL DEFAULT '[]',\
+            profile_id TEXT, FOREIGN KEY (task_id) REFERENCES test_task(id))"
+    ).await?;
+
+    // 种子数据：默认指标定义
+    seed_metric_definitions(pool).await?;
+
+    info!("数据库迁移完成（14 张表）",);
     Ok(())
 }
 
@@ -299,5 +358,40 @@ async fn add_column_if_missing(
         sqlx::query(&sql).execute(pool).await?;
         info!("增量迁移: 为 {}.{} 添加列", table, column);
     }
+    Ok(())
+}
+
+/// 种子数据：插入默认指标定义（幂等）
+async fn seed_metric_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
+    let count: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM metric_definition")
+        .fetch_one(pool).await?;
+    if count > 0 { return Ok(()); }
+
+    let defs = [
+        ("dns_time","DNS解析时延","network","DnsEngine","DNS 解析耗时"),
+        ("tcp_time","TCP连接时延","network","HttpEngine","TCP 握手耗时"),
+        ("tls_time","TLS握手时延","network","HttpEngine","TLS 握手耗时"),
+        ("ttfb","首包时延","network","HttpEngine","首字节响应时间"),
+        ("http_status","HTTP状态码","network","HttpEngine","HTTP 状态码"),
+        ("fcp","首屏时延(FCP)","page","PageCollector","First Contentful Paint"),
+        ("dom_load","DOM加载时延","page","PageCollector","DOMContentLoaded"),
+        ("load_time","首页时延","page","PageCollector","Load Event 时间"),
+        ("lcp","最大内容绘制","performance","TraceCollector","Largest Contentful Paint"),
+        ("cls","累计布局偏移","performance","TraceCollector","Cumulative Layout Shift"),
+        ("total_size","页面总大小","resource","NetworkCollector","所有资源总大小"),
+        ("html_size","HTML大小","resource","NetworkCollector","HTML 文档大小"),
+        ("css_size","CSS大小","resource","NetworkCollector","样式表总大小"),
+        ("js_size","JS大小","resource","NetworkCollector","脚本总大小"),
+        ("img_size","图片大小","resource","NetworkCollector","图片总大小"),
+        ("requests","请求数量","resource","NetworkCollector","总 HTTP 请求数"),
+    ];
+
+    for (name, display, cat, collector, desc) in &defs {
+        let id = uuid::Uuid::new_v4().to_string();
+        let _ = sqlx::query(
+            "INSERT OR IGNORE INTO metric_definition (id,name,display_name,category,collector,description) VALUES (?,?,?,?,?,?)"
+        ).bind(&id).bind(name).bind(display).bind(cat).bind(collector).bind(desc).execute(pool).await;
+    }
+    info!("种子数据: 已插入 {} 条指标定义", defs.len());
     Ok(())
 }

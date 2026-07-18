@@ -7,6 +7,7 @@ import {
   useMessage, NIcon
 } from 'naive-ui'
 import { taskApi } from '@/api/task'
+import MetricSelector from '@/components/MetricSelector.vue'
 
 const message = useMessage()
 
@@ -19,6 +20,7 @@ const repeatCount = ref(1)
 const fileContent = ref('')
 const fileError = ref('')
 const importResult = ref<{ created: number; failed: number; message: string; task_ids?: string[] } | null>(null)
+const selectedMetrics = ref(['dns_time','tcp_time','tls_time','ttfb','http_status','fcp','dom_load','load_time','total_size'])
 
 const typeOptions = [
   { label: 'Ping (连通性)', value: 'ping' },
@@ -79,7 +81,7 @@ async function doCreate() {
   loading.value = true
   try {
     const opts: any = { repeat_count: repeatCount.value }
-    if (taskType.value === 'website') opts.metrics = ['basic', 'page', 'resource']
+    if (taskType.value === 'website') opts.metrics = [...selectedMetrics.value]
     await taskApi.create({ task_type: taskType.value, urls: urlList.value, options: opts })
     message.success('任务已创建'); importResult.value = null
   } catch (e: any) { message.error(e?.msg || '创建失败') }
@@ -124,6 +126,7 @@ async function doCreate() {
           <n-space vertical size="medium">
             <div><n-text depth="3">类型</n-text><n-radio-group v-model:value="taskType"><n-radio v-for="o in typeOptions" :key="o.value" :value="o.value">{{ o.label }}</n-radio></n-radio-group></div>
             <div><n-text depth="3">重复次数 (>1 取平均)</n-text><n-input-number v-model:value="repeatCount" :min="1" :max="10" style="max-width:120px" /></div>
+            <div v-if="taskType === 'website'"><MetricSelector v-model="selectedMetrics" /></div>
             <div><n-text depth="3">URL（每行一个）</n-text><n-input v-model:value="urlText" type="textarea" placeholder="https://www.baidu.com&#10;https://github.com" :autosize="{ minRows: 5, maxRows: 12 }" /><n-text depth="3" style="font-size:12px">已输入 {{ urlList.length }} 个</n-text></div>
             <n-button type="primary" block :disabled="!urlList.length" :loading="loading" @click="doCreate">创建任务</n-button>
           </n-space>

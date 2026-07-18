@@ -161,6 +161,19 @@ fn parse_repeat_count(options: &serde_json::Value) -> usize {
         .max(1)
 }
 
+/// 从 job options 中提取启用的指标集合
+fn parse_metrics(options: &serde_json::Value) -> Vec<String> {
+    options.get("metrics")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_else(|| vec!["basic".into(), "page".into(), "resource".into()])
+}
+
+/// 检查是否启用了某类指标
+fn metric_enabled(metrics: &[String], category: &str) -> bool {
+    metrics.iter().any(|m| m == category || m == "all")
+}
+
 /// 对单个 URL 执行 N 次网站测试并取平均
 async fn test_website_url(
     db: &SqlitePool,
