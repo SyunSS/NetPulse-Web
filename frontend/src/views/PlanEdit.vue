@@ -117,9 +117,20 @@ const nextRunPreview = ref<string | null>(null)
 
 function downloadPlanTemplate() {
   const template = `\
-// NetPulse 测试计划导入模板
-// 用 [类型] 标记分组，下面放 URL 列表，每行一个
-// ping 支持纯域名或 IP，其他类型请用完整 http(s) URL
+// ═══════════════════════════════════════════════════
+// NetPulse 测试计划导入模板 v1.1
+// ═══════════════════════════════════════════════════
+// 支持类型: [website] [video] [download] [ping]
+// 每个 URL 一行, ping 支持纯域名或 IP:端口
+//
+// 选项说明 (手动添加时在编辑页面设置):
+//   repeat_count — 重复测试次数, >1 取平均值 (默认1)
+//   metrics      — website 采集指标, 可选:
+//       dns_time / tcp_time / tls_time / ttfb / http_status
+//       fcp / dom_load / load_time
+//       total_size / html_size / css_size / js_size / img_size / requests
+//       lcp / cls / tti (高级性能, 较耗时)
+// ═══════════════════════════════════════════════════
 
 [website]
 https://www.baidu.com
@@ -127,14 +138,17 @@ https://github.com
 
 [video]
 https://www.bilibili.com/video/BV1GJ411x7h7
+https://www.youtube.com/watch?v=dQw4w9WgXcQ
 
 [download]
 http://speedtest.tele2.net/1MB.zip
+https://d.zhipin.com/boss/boss/13.141/64/boss_13.141_c0.apk
 
 [ping]
 lobby-prod-b.df.qq.com
 receiver.tdm.qq.com
 1.1.1.1:443
+8.8.8.8
 `
   const blob = new Blob([template], { type: 'text/plain' })
   const a = document.createElement('a')
