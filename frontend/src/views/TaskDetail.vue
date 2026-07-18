@@ -31,6 +31,8 @@ async function fetchLogs() {
   catch (_) {}
 }
 
+function scrollToLogs() { document.querySelector('.log-section')?.scrollIntoView({behavior:'smooth'}) }
+
 let unsubWs: (() => void) | null = null
 
 const isVideoTask = computed(() => task.value?.task_type === 'video')
@@ -120,6 +122,7 @@ const stClass = (s: string) => `st st-${s}`
         <button v-if="task && task.status==='running'" class="btn danger" @click="handleDelete(true)">强制删除</button>
         <button v-if="task && ['completed','failed','cancelled'].includes(task.status)" class="btn primary" @click="taskApi.retry(taskId).then(r=>router.push('/task/'+r.data.task_id))">重新测试</button>
         <button v-if="task && !['pending','running'].includes(task.status)" class="btn danger" @click="handleDelete()">删除</button>
+        <button class="btn" @click="scrollToLogs">📋 日志</button>
         <div v-if="task?.status==='completed'" style="display:flex;gap:6px">
           <button class="btn" @click="handleExport('xlsx')">📥 Excel</button>
           <button class="btn" @click="handleExport('csv')">📥 CSV</button>
@@ -262,9 +265,10 @@ const stClass = (s: string) => `st st-${s}`
     </div>
 
     <!-- 运行日志 -->
-    <div v-if="taskLogs.length" class="card">
-      <div class="card-title">📋 运行日志</div>
-      <div class="log-list">
+    <div class="card log-section">
+      <div class="card-title">📋 运行日志 {{ taskLogs.length ? '('+taskLogs.length+')' : '' }}</div>
+      <div v-if="!taskLogs.length" class="log-empty">暂无日志</div>
+      <div v-else class="log-list">
         <div v-for="(log, i) in taskLogs" :key="i" class="log-line" :class="'log-'+log.level">
           <span class="log-time">{{ log.created_at?.substring(11,19) || '-' }}</span>
           <span class="log-level">{{ log.level }}</span>
