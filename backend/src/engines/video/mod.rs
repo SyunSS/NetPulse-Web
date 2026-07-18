@@ -178,15 +178,32 @@ impl VideoEngine {
             };
         }
 
-        // 判断总体播放状态: 有 Media 事件或有 player 创建
+        // 判断总体播放状态: 有 Media 事件或 JS 检测到播放
+        let video_state_js = r#"JSON.stringify((function(){
+            var videos = document.querySelectorAll('video');
+            if (videos.length === 0) return {count:0};
+            var v = videos[0];
+            return {count:videos.length, paused:v.paused, currentTime:v.currentTime, duration:v.duration, ended:v.ended};
+        })())"#;
+        let video_state: serde_json::Value = page.evaluate_sync(video_state_js)
+            .ok().and_then(|v| v.as_str().and_then(|s| serde_json::from_str(s).ok()))
+            .unwrap_or(serde_json::Value::Null);
+
+        let js_playing = video_state.get("currentTime").and_then(|v| v.as_f64()).unwrap_or(0.0) > 0.1
+            && video_state.get("paused").and_then(|v| v.as_bool()).unwrap_or(true) == false;
+        let video_count = video_state.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
+
         let has_playback = media.play_success
             || media.first_play_time_ms.is_some()
             || diag.media_event_count > 0
             || diag.player_created
-            || net.segment_count > 0;
+            || net.segment_count > 0
+            || js_playing;
 
         let error_msg = if has_playback { None }
-            else { Some(diag.last_error.clone().unwrap_or("视频未检测到播放事件".into())) };
+            else { Some(format!("无播放: CDP事件={} network请求={} segments={} video元素={} playing={}",
+                diag.media_event_count, diag.network_media_request_count, net.segment_count,
+                video_count, js_playing)) };
 
         VideoTestResult {
             platform: platform_cfg.name.clone(),

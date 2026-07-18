@@ -357,6 +357,7 @@ pub fn export_plan_run_xlsx(
         let headers = [
             "URL", "DNS解析时延(ms)", "DNS解析成功率(%)", "TCP连接时延(ms)",
             "访问成功率(%)", "首包时延(ms)", "首屏时延(ms)", "首页时延(ms)",
+            "总请求", "HTML(KB)", "CSS(KB)", "JS(KB)", "图片(KB)", "字体(KB)",
         ];
         for (col, h) in headers.iter().enumerate() {
             sheet.write_with_format(0, col as u16, *h, &header_fmt)?;
@@ -373,8 +374,14 @@ pub fn export_plan_run_xlsx(
             write_num(sheet, row, 5, r.ttfb_ms, fmt)?;
             write_num(sheet, row, 6, r.dom_content_loaded_ms, fmt)?;
             write_num(sheet, row, 7, r.load_event_ms, fmt)?;
+            write_num_i32(sheet, row, 8, r.total_requests, fmt)?;
+            write_kb(sheet, row, 9, r.html_size, fmt)?;
+            write_kb(sheet, row, 10, r.css_size, fmt)?;
+            write_kb(sheet, row, 11, r.js_size, fmt)?;
+            write_kb(sheet, row, 12, r.image_size, fmt)?;
+            write_kb(sheet, row, 13, r.font_size, fmt)?;
         }
-        for col in 0..headers.len() as u16 { sheet.set_column_width(col, 18.0)?; }
+        for col in 0..headers.len() as u16 { sheet.set_column_width(col, 14.0)?; }
         sheet.set_freeze_panes(1, 0)?;
     }
 
@@ -397,7 +404,7 @@ pub fn export_plan_run_xlsx(
             sheet.write_with_format(row, 0, &r.url, &url_fmt)?;
             sheet.write_with_format(row, 1, r.platform.as_deref().unwrap_or("-"), fmt)?;
             write_num(sheet, row, 2, r.dns_time_ms, fmt)?;
-            write_num_i32(sheet, row, 3, r.dns_success, fmt)?;
+            write_ok(sheet, row, 3, r.dns_success, fmt)?;
             write_num(sheet, row, 4, r.tcp_time_ms, fmt)?;
             write_num(sheet, row, 5, r.http_response_ms, fmt)?;
             write_num(sheet, row, 6, r.first_play_time_ms, fmt)?;
