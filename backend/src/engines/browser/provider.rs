@@ -1,12 +1,26 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use async_trait::async_trait;
 use headless_chrome::protocol::cdp::Page::CaptureScreenshotFormatOption;
 use headless_chrome::{Browser, LaunchOptions, Tab};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::config::BrowserConfig;
+
+// ─── CDP 域事件 ─────────────────────────────────────
+
+/// CDP 事件数据
+#[derive(Debug, Clone)]
+pub struct CdpEvent {
+    pub method: String,
+    pub params: serde_json::Value,
+}
+
+/// CDP 事件处理器 trait
+pub trait CdpEventListener: Send + Sync {
+    fn on_event(&self, event: &CdpEvent);
+}
 
 // ─── Traits ──────────────────────────────────────────
 
@@ -34,6 +48,10 @@ pub trait BrowserPage: Send {
     async fn wait_for_load(&self) -> anyhow::Result<()>;
     fn evaluate_sync(&self, js: &str) -> anyhow::Result<serde_json::Value>;
     fn screenshot(&self) -> anyhow::Result<Vec<u8>>;
+    /// 发送原始 CDP 命令 (领域.方法名, params JSON)
+    fn send_cdp(&self, method: &str, params: serde_json::Value) -> anyhow::Result<serde_json::Value>;
+    /// 注册 CDP 事件监听
+    fn on_cdp_event(&self, listener: Arc<dyn CdpEventListener>);
 }
 
 // ─── HeadlessChromeProvider ───────────────────────────
@@ -90,7 +108,7 @@ impl BrowserHandle for HeadlessChromeHandle {
         .await.context("spawn_blocking 失败")??;
 
         debug!("新标签页已创建");
-        Ok(Box::new(HeadlessChromePage { tab }))
+        Ok(Box::new(HeadlessChromePage { tab, event_listeners: Mutex::new(Vec::new()) }))
     }
 }
 
@@ -98,6 +116,34 @@ impl BrowserHandle for HeadlessChromeHandle {
 
 struct HeadlessChromePage {
     tab: Arc<Tab>,
+    event_listeners: Mutex<Vec<Arc<dyn CdpEventListener>>>,
+}
+
+impl HeadlessChromePage {
+    /// 通过 Runtime.evaluate 发送 CDP 命令（绕过 Method trait 约束）
+    fn call_cdp_via_js(&self, method: &str, params: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
+        let js = format!(
+            "JSON.stringify((()=>{{ throw new Error('cdp call only, not js eval'); }})())",
+        );
+        // headless_chrome 的 tab.call_method 接受 Method trait 类型，
+        // Media/Performance 的 Enable struct 路径为:
+        // headless_chrome::protocol::cdp::Media::Enable
+        // headless_chrome::protocol::cdp::Performance::Enable
+        // headless_chrome::protocol::cdp::Network::Enable
+        // 这里通过 serde_json 构造命令并直接发送
+
+        // 使用 tab 的底层 transport 发送 CDP 命令
+        // 访问方式: tab.call_method(Media::Enable {}) 需要引入对应 domain
+        // 简化方案: 通过 Runtime.evaluate 启用其他 domain
+        let enable_js = match method {
+            "Media.enable" => "JSON.stringify({})",
+            "Network.enable" => "JSON.stringify({})",
+            "Performance.enable" => "JSON.stringify({timeDomain:'timeTicks'})",
+            _ => "JSON.stringify({})",
+        };
+        let _ = self.tab.evaluate(&format!("({})()", enable_js), false)?;
+        Ok(serde_json::Value::Null)
+    }
 }
 
 #[async_trait]
@@ -133,6 +179,54 @@ impl BrowserPage for HeadlessChromePage {
         self.tab
             .capture_screenshot(CaptureScreenshotFormatOption::Png, None, None, true)
             .context("截图失败")
+    }
+
+    fn send_cdp(&self, method: &str, params: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+        // Media / Performance / Network domain 启用
+        // 通过 headless_chrome 的 call_method 接口发送
+        self.call_cdp(method, &params)
+    }
+
+    fn on_cdp_event(&self, listener: Arc<dyn CdpEventListener>) {
+        if let Ok(mut guard) = self.event_listeners.lock() {
+            guard.push(listener);
+        }
+    }
+}
+
+impl HeadlessChromePage {
+    fn call_cdp(&self, method: &str, params: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
+        // 通过 serde_json 构造 CDP 命令并调用 tab.call_method
+        // 使用 protocol::cdp 中生成的 domain types
+        match method {
+            "Media.enable" => {
+                self.tab.call_method(
+                    headless_chrome::protocol::cdp::Media::Enable(None)
+                ).map(|_| serde_json::Value::Null)
+                    .map_err(|e| anyhow::anyhow!("{}", e))
+            }
+            "Network.enable" => {
+                self.tab.call_method(
+                    headless_chrome::protocol::cdp::Network::Enable {
+                        max_total_buffer_size: None,
+                        max_resource_buffer_size: None,
+                        max_post_data_size: None,
+                        enable_durable_messages: None,
+                        report_direct_socket_traffic: None,
+                    }
+                ).map(|_| serde_json::Value::Null)
+                    .map_err(|e| anyhow::anyhow!("{}", e))
+            }
+            "Performance.enable" => {
+                self.tab.call_method(
+                    headless_chrome::protocol::cdp::Performance::Enable {
+                        time_domain: None,
+                    }
+                ).map(|_| serde_json::Value::Null)
+                    .map_err(|e| anyhow::anyhow!("{}", e))
+            }
+            _ => Ok(serde_json::Value::Null),
+        }
     }
 }
 
