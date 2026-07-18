@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { usePlanStore } from '@/stores/plan'
 import type { PlanItemInput } from '@/api/plan'
+import MetricSelector from '@/components/MetricSelector.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -163,7 +164,7 @@ function addItem() {
   items.value.push({
     task_type: 'website',
     urls: [],
-    options: {},
+    options: { metrics: ['dns_time','tcp_time','tls_time','ttfb','http_status','fcp','dom_load','load_time','total_size'] },
     repeat_count: 1,
     engine: 'headless_chrome',
   })
@@ -171,6 +172,21 @@ function addItem() {
 
 function removeItem(index: number) {
   items.value.splice(index, 1)
+}
+
+function getItemMetrics(idx: number): string[] {
+  const opts = items.value[idx]?.options
+  if (typeof opts === 'object' && opts && !Array.isArray(opts)) {
+    return (opts as any).metrics || []
+  }
+  return []
+}
+function setItemMetrics(idx: number, metrics: string[]) {
+  if (!items.value[idx]) return
+  const opts = items.value[idx].options
+  if (typeof opts === 'object' && opts && !Array.isArray(opts)) {
+    (opts as any).metrics = metrics
+  }
 }
 
 function addUrlToItem(index: number) {
@@ -442,6 +458,9 @@ onMounted(() => {
                 <button class="url-remove" @click="removeUrlFromItem(idx, urlIdx)">×</button>
               </div>
               <button class="add-url-btn" @click="addUrlToItem(idx)">+ 添加 URL</button>
+            </div>
+            <div v-if="item.task_type === 'website'" style="margin-top:8px">
+              <MetricSelector :model-value="getItemMetrics(idx)" @update:model-value="(v) => setItemMetrics(idx, v)" />
             </div>
           </div>
         </div>
