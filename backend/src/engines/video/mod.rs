@@ -135,6 +135,20 @@ impl VideoEngine {
         // 6. 页面预处理（关闭 cookie/弹窗）
         page_preprocess(&*page).await;
 
+        // 6.5 注入视频事件监听 JS（轻量，用于补充 first_play / buffer 统计）
+        let _ = page.evaluate_sync(
+            r#"(function(){
+                var v = document.querySelector('video');
+                if (!v) return;
+                window.__videoStats = window.__videoStats || { first_play_time_ms: null, buffer_count: 0, total_buffer_time_ms: 0, _buffer_start: null, _start: performance.now() };
+                var s = window.__videoStats;
+                v.addEventListener('playing', function(){ if (s.first_play_time_ms===null) s.first_play_time_ms = performance.now()-s._start; });
+                v.addEventListener('waiting', function(){ s.buffer_count++; s._buffer_start = performance.now(); });
+                v.addEventListener('playing', function(){ if (s._buffer_start!==null){ s.total_buffer_time_ms += performance.now()-s._buffer_start; s._buffer_start=null; }});
+                try { v.play().catch(function(){}); } catch(e){}
+            })()"#
+        );
+
         // 7. PlaybackController: 多级播放触发
         let max_wait = if platform_cfg.is_detect_only() { 10 } else { 60 };
         let mut ctrl = playback::PlaybackController::new(max_wait);
@@ -158,7 +172,37 @@ impl VideoEngine {
         let trigger = ctrl.trigger_method();
         let diag = ctrl.diagnostics();
 
-        // 8. 采集结果
+        // 8. JS 直接读取 video 元素实时状态（弥补 CDP 事件不稳定的问题）
+        let video_state_js = r#"JSON.stringify((function(){
+            var videos = document.querySelectorAll('video');
+            if (videos.length === 0) return {count:0};
+            var v = videos[0];
+            var stats = window.__videoStats || {};
+            return {
+                count: videos.length, paused: v.paused, currentTime: v.currentTime,
+                duration: v.duration, ended: v.ended,
+                readyState: v.readyState, networkState: v.networkState,
+                webkitDecodedFrameCount: v.webkitDecodedFrameCount,
+                webkitDroppedFrameCount: v.webkitDroppedFrameCount,
+                first_play_ms: stats.first_play_time_ms || null,
+                buffer_count: stats.buffer_count || 0,
+                buffer_time: stats.total_buffer_time_ms || 0,
+                is_playing: !v.paused && v.currentTime > 0.1
+            };
+        })())"#;
+        let video_js: serde_json::Value = page.evaluate_sync(video_state_js)
+            .ok().and_then(|v| v.as_str().and_then(|s| serde_json::from_str(s).ok()))
+            .unwrap_or(serde_json::json!({"count":0}));
+
+        // 解析 JS 采集的数据（作为 CDP fallback）
+        let js_first_play = video_js.get("first_play_ms").and_then(|v| v.as_f64());
+        let js_buffer_count = video_js.get("buffer_count").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let js_buffer_time = video_js.get("buffer_time").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let js_playing = video_js.get("is_playing").and_then(|v| v.as_bool()).unwrap_or(false);
+        let js_dropped = video_js.get("webkitDroppedFrameCount").and_then(|v| v.as_i64());
+        let js_decoded = video_js.get("webkitDecodedFrameCount").and_then(|v| v.as_i64());
+
+        // 9. 采集 CDP 结果
         let page_title = page.evaluate_sync("document.title").ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()));
         let screenshot = page.screenshot().ok();
@@ -178,32 +222,18 @@ impl VideoEngine {
             };
         }
 
-        // 判断总体播放状态: 有 Media 事件或 JS 检测到播放
-        let video_state_js = r#"JSON.stringify((function(){
-            var videos = document.querySelectorAll('video');
-            if (videos.length === 0) return {count:0};
-            var v = videos[0];
-            return {count:videos.length, paused:v.paused, currentTime:v.currentTime, duration:v.duration, ended:v.ended};
-        })())"#;
-        let video_state: serde_json::Value = page.evaluate_sync(video_state_js)
-            .ok().and_then(|v| v.as_str().and_then(|s| serde_json::from_str(s).ok()))
-            .unwrap_or(serde_json::Value::Null);
-
-        let js_playing = video_state.get("currentTime").and_then(|v| v.as_f64()).unwrap_or(0.0) > 0.1
-            && video_state.get("paused").and_then(|v| v.as_bool()).unwrap_or(true) == false;
-        let video_count = video_state.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
-
+        // 判断总体播放状态: CDP 事件 + Netzwork segments + JS playing
         let has_playback = media.play_success
             || media.first_play_time_ms.is_some()
+            || js_first_play.is_some()
             || diag.media_event_count > 0
             || diag.player_created
             || net.segment_count > 0
             || js_playing;
 
         let error_msg = if has_playback { None }
-            else { Some(format!("无播放: CDP事件={} network请求={} segments={} video元素={} playing={}",
-                diag.media_event_count, diag.network_media_request_count, net.segment_count,
-                video_count, js_playing)) };
+            else { Some(format!("无播放: CDP={} net={} seg={} js_playing={}",
+                diag.media_event_count, diag.network_media_request_count, net.segment_count, js_playing)) };
 
         VideoTestResult {
             platform: platform_cfg.name.clone(),
@@ -213,12 +243,21 @@ impl VideoEngine {
             video_codec: media.video_codec, audio_codec: media.audio_codec,
             resolution: media.resolution, fps: media.fps,
             video_bitrate_kbps: media.video_bitrate_kbps, audio_bitrate_kbps: media.audio_bitrate_kbps,
-            first_play_time_ms: media.first_play_time_ms, play_success: has_playback,
-            buffer_count: Some(media.buffer_count), buffer_time_ms: Some(media.buffer_time_ms),
-            dropped_frames: Some(media.dropped_frames), decoded_frames: Some(media.decoded_frames),
+            first_play_time_ms: media.first_play_time_ms.or(js_first_play),
+            play_success: has_playback,
+            buffer_count: Some(if media.buffer_count > 0 { media.buffer_count } else { js_buffer_count }),
+            buffer_time_ms: Some(if media.buffer_time_ms > 0.0 { media.buffer_time_ms } else { js_buffer_time }),
+            dropped_frames: Some(media.dropped_frames.max(js_dropped.unwrap_or(0) as i32)),
+            decoded_frames: Some(media.decoded_frames.max(js_decoded.unwrap_or(0) as i32)),
             video_host: net.video_host, audio_host: net.audio_host, cdn_node: net.cdn_node,
             segment_count: Some(net.segment_count), total_bytes: Some(net.total_bytes as i32),
-            download_speed: net.download_speed, avg_speed: net.avg_speed, peak_speed: net.peak_speed,
+            download_speed: net.download_speed.or_else(|| {
+                let total = net.total_bytes as f64;
+                if total > 0.0 && diag.total_wait_ms > 0 {
+                    Some(total / (diag.total_wait_ms as f64 / 1000.0) / 1024.0)
+                } else { None }
+            }),
+            avg_speed: net.avg_speed, peak_speed: net.peak_speed,
             page_title, screenshot, error: error_msg,
             trigger_method: Some(diag.trigger_method.clone()),
             player_created: Some(diag.player_created),
