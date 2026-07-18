@@ -78,7 +78,9 @@ async function doImport() {
 async function doCreate() {
   loading.value = true
   try {
-    await taskApi.create({ task_type: taskType.value, urls: urlList.value, options: { repeat_count: repeatCount.value } })
+    const opts: any = { repeat_count: repeatCount.value }
+    if (taskType.value === 'website') opts.metrics = ['basic', 'page', 'resource']
+    await taskApi.create({ task_type: taskType.value, urls: urlList.value, options: opts })
     message.success('任务已创建'); importResult.value = null
   } catch (e: any) { message.error(e?.msg || '创建失败') }
   finally { loading.value = false }
