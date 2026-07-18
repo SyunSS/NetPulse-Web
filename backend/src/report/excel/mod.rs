@@ -457,7 +457,7 @@ pub fn export_plan_run_xlsx(
         }
         for (i, r) in ping_data.iter().enumerate() {
             let row = (i + 1) as u32;
-            let ok = r.success == Some(1);
+            let ok = matches!(r.success, Some(100) | Some(1));
             let fmt = if ok { &ok_fmt } else { &err_fmt };
             sheet.write_with_format(row, 0, &r.host, &url_fmt)?;
             write_num(sheet, row, 1, r.avg_latency_ms, fmt)?;
