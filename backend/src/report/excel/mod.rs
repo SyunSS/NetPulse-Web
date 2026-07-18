@@ -265,9 +265,8 @@ fn write_num_i32(sheet: &mut Worksheet, row: u32, col: u16, val: Option<i32>, fm
 
 fn write_ok(sheet: &mut Worksheet, row: u32, col: u16, val: Option<i32>, fmt: &Format) -> Result<(), XlsxError> {
     match val {
-        Some(1) => { sheet.write_with_format(row, col, "100", fmt)?; Ok(()) }
-        Some(0) => { sheet.write_with_format(row, col, "0", fmt)?; Ok(()) }
-        _ => { sheet.write_with_format(row, col, "-", fmt)?; Ok(()) }
+        Some(v) => { sheet.write_with_format(row, col, v, fmt)?; Ok(()) }
+        None => { sheet.write_with_format(row, col, "-", fmt)?; Ok(()) }
     }
 }
 

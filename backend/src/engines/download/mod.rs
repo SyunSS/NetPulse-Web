@@ -119,7 +119,7 @@ async fn probe_dns_tcp(url_str: &str) -> (f64, i32, f64) {
         .ok().and_then(|mut a| a.next())
     ).await.ok().flatten();
     let dns_time = dns_start.elapsed().as_secs_f64() * 1000.0;
-    let dns_success = if dns_result.is_some() { 1 } else { 0 };
+    let dns_success = if dns_result.is_some() { 100 } else { 0 };
 
     // TCP 连接
     let tcp_time = if let Some(addr) = dns_result {

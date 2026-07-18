@@ -144,7 +144,7 @@ const stClass = (s: string) => `st st-${s}`
             <tr v-for="r in websiteResults" :key="r.id">
               <td class="url-cell">{{ r.url }}</td>
               <td>{{ r.dns_time_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.dns_success === 1 ? '100' : '0' }}</td>
+              <td>{{ (r.dns_success ?? null) !== null ? r.dns_success + '%' : '-' }}</td>
               <td>{{ r.tcp_time_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.error_msg ? '0' : '100' }}</td>
               <td>{{ r.ttfb_ms?.toFixed(1) ?? '-' }}</td>
@@ -174,7 +174,7 @@ const stClass = (s: string) => `st st-${s}`
               <td class="url-cell">{{ r.url }}</td>
               <td>{{ r.platform || '-' }}</td>
               <td>{{ r.dns_time_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.dns_success !== null ? (r.dns_success === 1 ? '100' : '0') : '-' }}</td>
+              <td>{{ (r.dns_success ?? null) !== null ? r.dns_success + '%' : '-' }}</td>
               <td>{{ r.tcp_time_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.http_response_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.first_play_time_ms?.toFixed(0) ?? '-' }}</td>
@@ -202,7 +202,7 @@ const stClass = (s: string) => `st st-${s}`
             <tr v-for="r in downloadResults" :key="r.id">
               <td class="url-cell">{{ r.url }}</td>
               <td>{{ r.dns_time_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.dns_success === 1 ? '100' : '0' }}</td>
+              <td>{{ (r.dns_success ?? null) !== null ? r.dns_success + '%' : '-' }}</td>
               <td>{{ r.tcp_time_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.download_speed ? (r.download_speed / 125).toFixed(2) : '-' }}</td>
               <td>{{ r.success === 1 ? '100' : '0' }}</td>
