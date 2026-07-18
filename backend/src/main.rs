@@ -26,13 +26,14 @@ use crate::worker::TaskWorker;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // 加载配置
+    let config = AppConfig::load()?;
+
     // 初始化日志系统
-    init_logging();
+    init_logging(&config.logging);
 
     info!("NetPulse Web 启动中...");
 
-    // 加载配置
-    let config = AppConfig::load()?;
     info!("配置加载完成，监听地址: {}", config.server_addr());
 
     // 确保存储目录存在
@@ -102,14 +103,38 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// 初始化日志系统
-fn init_logging() {
+fn init_logging(log_cfg: &crate::config::LoggingConfig) {
+    use tracing_appender::rolling;
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,netpulse_web=debug"));
+        .unwrap_or_else(|_| EnvFilter::new(&log_cfg.level));
 
-    tracing_subscriber::registry()
-        .with(fmt::layer().with_target(true))
-        .with(filter)
-        .init();
+    let registry = tracing_subscriber::registry();
+
+    // 控制台输出
+    if log_cfg.console {
+        let console_layer = match log_cfg.format.as_str() {
+            "json" => Box::new(fmt::layer().json().with_target(false).with_writer(std::io::stdout))
+                as Box<dyn tracing_subscriber::Layer<_> + Send + Sync>,
+            _ => Box::new(fmt::layer().compact().with_target(false).with_writer(std::io::stdout)),
+        };
+        registry.with(console_layer).with(filter.clone()).init();
+        return;
+    }
+
+    // 文件滚动输出
+    let file_layer = match log_cfg.format.as_str() {
+        "json" => {
+            let file = rolling::daily(&log_cfg.file_dir, "netpulse.log");
+            Box::new(fmt::layer().json().with_target(false).with_writer(file))
+                as Box<dyn tracing_subscriber::Layer<_> + Send + Sync>
+        }
+        _ => {
+            let file = rolling::daily(&log_cfg.file_dir, "netpulse.log");
+            Box::new(fmt::layer().with_target(false).with_ansi(false).with_writer(file))
+                as Box<dyn tracing_subscriber::Layer<_> + Send + Sync>
+        }
+    };
+    registry.with(file_layer).with(filter).init();
 }

@@ -79,7 +79,15 @@ pub struct DatabaseConfig {
 pub struct LoggingConfig {
     pub level: String,
     pub file_dir: String,
+    #[serde(default = "default_log_format")]
+    pub format: String,      // "console" | "json"
+    #[serde(default = "default_true")]
+    pub console: bool,
+    #[serde(default = "default_true")]
+    pub file: bool,
 }
+fn default_log_format() -> String { "console".to_string() }
+fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BrowserConfig {

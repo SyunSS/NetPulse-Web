@@ -17,6 +17,7 @@ pub fn task_routes() -> Router<AppState> {
         .route("/create", post(create_task))
         .route("/list", get(list_tasks))
         .route("/:id", get(get_task))
+        .route("/:id/logs", get(get_task_logs))
         .route("/:id/result", get(get_task_results))
         .route("/:id/video-result", get(get_video_results))
         .route("/:id/download-result", get(get_download_results))
@@ -382,6 +383,26 @@ async fn download_template() -> Result<Json<crate::utils::response::ApiResponse<
         },
     })))
 }
+
+/// 获取任务运行日志
+async fn get_task_logs(
+    State(state): State<AppState>,
+    Extension(_claims): Extension<Claims>,
+    Path(task_id): Path<String>,
+) -> Result<Json<crate::utils::response::ApiResponse<Vec<TaskLogEntry>>>, AppError> {
+    use crate::models::task::TaskLog;
+    let logs = sqlx::query_as::<_, TaskLog>(
+        "SELECT * FROM task_log WHERE task_id = ? ORDER BY created_at ASC"
+    ).bind(&task_id).fetch_all(&state.db).await
+        .map_err(|e| AppError::internal(&e.to_string()))?;
+    let entries: Vec<TaskLogEntry> = logs.iter().map(|l| TaskLogEntry {
+        level: l.level.clone(), message: l.message.clone(), created_at: l.created_at.clone(),
+    }).collect();
+    Ok(Json(ok(entries)))
+}
+
+#[derive(Debug, Serialize)]
+struct TaskLogEntry { level: String, message: String, created_at: String }
 
 fn file_response(bytes: Vec<u8>, content_type: &str, filename: &str) -> Response {
     Response::builder()

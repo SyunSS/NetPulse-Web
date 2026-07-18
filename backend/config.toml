@@ -10,6 +10,9 @@ path = "./data/netpulse.db"
 [logging]
 level = "info"
 file_dir = "./logs"
+format = "console"
+console = true
+file = true
 
 [browser]
 path = "/usr/bin/chromium"

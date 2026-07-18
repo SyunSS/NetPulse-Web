@@ -22,7 +22,14 @@ const pingResults = ref<PingResult[]>([])
 const loading = ref(true)
 const progress = ref(0)
 const logs = ref<string[]>([])
+const taskLogs = ref<LogEntry[]>([])
+interface LogEntry { level: string; message: string; created_at: string }
 const ws = getWsClient()
+
+async function fetchLogs() {
+  try { taskLogs.value = ((await http.get(`/task/${taskId}/logs`)).data || []) as LogEntry[] }
+  catch (_) {}
+}
 
 let unsubWs: (() => void) | null = null
 
@@ -59,6 +66,7 @@ function handleWsMessage(msg: ProgressMessage) {
   if (msg.type === 'log') logs.value.push(msg.message)
   if (['url_completed','task_completed','task_failed'].includes(msg.type)) fetchData()
 }
+    fetchLogs()
 
 async function handleDelete(force?: boolean) {
   const msg = force ? '强制删除此任务及所有结果？' : '确认删除此任务？'
@@ -88,6 +96,7 @@ async function handleExport(format: string) {
 }
 
 onMounted(() => {
+  fetchLogs()
   fetchData()
   ws.connect(taskId)
   unsubWs = ws.onMessage(handleWsMessage)
@@ -250,6 +259,18 @@ const stClass = (s: string) => `st st-${s}`
     <!-- 空状态 -->
     <div v-if="!loading && ((!isVideoTask&&!isDownloadTask&&!isPingTask&&!websiteResults.length)||(isVideoTask&&!videoResults.length)||(isDownloadTask&&!downloadResults.length)||(isPingTask&&!pingResults.length)) && task?.status==='completed'" class="card empty">
       <div class="empty-icon">📭</div><h3>暂无测试结果</h3><p>任务已完成但未返回数据</p>
+    </div>
+
+    <!-- 运行日志 -->
+    <div v-if="taskLogs.length" class="card">
+      <div class="card-title">📋 运行日志</div>
+      <div class="log-list">
+        <div v-for="(log, i) in taskLogs" :key="i" class="log-line" :class="'log-'+log.level">
+          <span class="log-time">{{ log.created_at?.substring(11,19) || '-' }}</span>
+          <span class="log-level">{{ log.level }}</span>
+          <span class="log-msg">{{ log.message }}</span>
+        </div>
+      </div>
     </div>
   </div>
 </template>
