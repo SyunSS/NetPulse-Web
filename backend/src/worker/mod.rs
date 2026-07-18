@@ -112,14 +112,14 @@ async fn run_website_task(
     update_task_status(&db, task_id, "running", None).await?;
 
     let _ = progress_tx.send(ProgressMessage::TaskStarted { task_id: task_id.clone(), total_urls: total });
-    log_progress(&progress_tx, task_id, "info", &format!("开始测试 {} 个URL (重复 {} 次)", total, repeat_count));
+    log_progress(&db, &progress_tx, task_id, "info", &format!("开始测试 {} 个URL (重复 {} 次)", total, repeat_count));
 
     let mut success_count = 0usize;
     let mut fail_count = 0usize;
 
     for (i, url) in job.urls.iter().enumerate() {
         let _ = progress_tx.send(ProgressMessage::UrlTesting { task_id: task_id.clone(), url: url.clone(), current: i + 1, total });
-        log_progress(&progress_tx, task_id, "info", &format!("正在测试: {}", url));
+        log_progress(&db, &progress_tx, task_id, "info", &format!("正在测试: {}", url));
 
         match test_website_url(&db, &config, &browser_provider, task_id, url, timeout, repeat_count).await {
             Ok(result) => {
@@ -128,7 +128,7 @@ async fn run_website_task(
             }
             Err(e) => {
                 fail_count += 1;
-                log_progress(&progress_tx, task_id, "error", &format!("测试失败 {}: {}", url, e));
+                log_progress(&db, &progress_tx, task_id, "error", &format!("测试失败 {}: {}", url, e));
                 let failed_result = WebsiteResult {
                     id: Uuid::new_v4().to_string(), task_id: task_id.clone(), url: url.clone(),
                     dns_time_ms: None, dns_success: None, tcp_time_ms: None, tls_time_ms: None,
@@ -406,6 +406,7 @@ async fn update_task_progress(
 
 /// 写入任务日志并推送进度
 fn log_progress(
+    db: &SqlitePool,
     tx: &broadcast::Sender<ProgressMessage>,
     task_id: &str,
     level: &str,
@@ -429,6 +430,19 @@ fn log_progress(
         "warn" => warn!("[{}] {}", tid, msg),
         _ => info!("[{}] {}", tid, msg),
     }
+
+    // 写 DB (后台 spawn 避免阻塞)
+    let db = db.clone();
+    let level_str = level_str.clone();
+    let msg = msg.clone();
+    let tid = tid.clone();
+    tokio::spawn(async move {
+        let now = chrono::Utc::now().to_rfc3339();
+        let _ = sqlx::query("INSERT INTO task_log (id, task_id, level, message, created_at) VALUES (?, ?, ?, ?, ?)")
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(&tid).bind(&level_str).bind(&msg).bind(&now)
+            .execute(&db).await;
+    });
 }
 
 // ===== 视频任务 =====
@@ -452,7 +466,7 @@ async fn run_video_task(
         total_urls: total,
     });
 
-    log_progress(&progress_tx, task_id, "info", &format!("开始视频测试 {} 个URL", total));
+    log_progress(&db, &progress_tx, task_id, "info", &format!("开始视频测试 {} 个URL", total));
 
     let mut success_count = 0usize;
     let mut fail_count = 0usize;
@@ -465,7 +479,7 @@ async fn run_video_task(
             total,
         });
 
-        log_progress(&progress_tx, task_id, "info", &format!("视频测试: {}", url));
+        log_progress(&db, &progress_tx, task_id, "info", &format!("视频测试: {}", url));
 
         match test_single_video(&db, &config, &browser_provider, task_id, url, timeout).await {
             Ok(result) => {
@@ -505,7 +519,7 @@ async fn run_video_task(
             }
             Err(e) => {
                 fail_count += 1;
-                log_progress(&progress_tx, task_id, "error", &format!("视频测试失败 {}: {}", url, e));
+                log_progress(&db, &progress_tx, task_id, "error", &format!("视频测试失败 {}: {}", url, e));
 
                 let failed_result = VideoResult {
                     id: Uuid::new_v4().to_string(),
@@ -551,6 +565,7 @@ async fn run_video_task(
     });
 
     log_progress(
+        &db,
         &progress_tx,
         task_id,
         "info",
@@ -681,7 +696,7 @@ async fn run_download_task(
 
     update_task_status(&db, task_id, "running", None).await?;
     let _ = progress_tx.send(ProgressMessage::TaskStarted { task_id: task_id.clone(), total_urls: total });
-    log_progress(&progress_tx, task_id, "info", &format!("开始下载测试 {} 个URL", total));
+    log_progress(&db, &progress_tx, task_id, "info", &format!("开始下载测试 {} 个URL", total));
 
     let mut success_count = 0usize;
     let mut fail_count = 0usize;
@@ -690,7 +705,7 @@ async fn run_download_task(
         let _ = progress_tx.send(ProgressMessage::UrlTesting {
             task_id: task_id.clone(), url: url.clone(), current: i + 1, total,
         });
-        log_progress(&progress_tx, task_id, "info", &format!("下载测试: {}", url));
+        log_progress(&db, &progress_tx, task_id, "info", &format!("下载测试: {}", url));
 
         let engine = DownloadEngine::new(timeout);
         let result = engine.test_download(url).await;
@@ -726,7 +741,7 @@ async fn run_download_task(
     let _ = progress_tx.send(ProgressMessage::TaskCompleted {
         task_id: task_id.clone(), success_count, fail_count,
     });
-    log_progress(&progress_tx, task_id, "info", &format!("下载任务完成: 成功{}, 失败{}", success_count, fail_count));
+    log_progress(&db, &progress_tx, task_id, "info", &format!("下载任务完成: 成功{}, 失败{}", success_count, fail_count));
     update_task_status(&db, task_id, "completed", None).await?;
 
     Ok(())
@@ -760,7 +775,7 @@ async fn run_ping_task(
 
     update_task_status(&db, task_id, "running", None).await?;
     let _ = progress_tx.send(ProgressMessage::TaskStarted { task_id: task_id.clone(), total_urls: total });
-    log_progress(&progress_tx, task_id, "info", &format!("开始 Ping 测试 {} 个目标 (每目标 {} 个包)", total, ping_count));
+    log_progress(&db, &progress_tx, task_id, "info", &format!("开始 Ping 测试 {} 个目标 (每目标 {} 个包)", total, ping_count));
 
     let mut success_count = 0usize;
     let mut fail_count = 0usize;
