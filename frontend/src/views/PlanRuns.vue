@@ -85,7 +85,7 @@ function resetSearch() {
 
 async function handleDelete(runId: string, force = false) {
   const msg = force
-    ? '强制停止并删除此次运行？仍在运行的任务会被取消。'
+    ? '强制停止并删除此次运行的所有子任务？⚠ 所有关联任务及结果将被永久删除。'
     : '确认删除这条运行记录？'
   if (!confirm(msg)) return
   try {

@@ -434,13 +434,19 @@ impl PlanService {
             anyhow::bail!("请等待任务完成后再删除，或使用强制删除");
         }
 
-        // 强制模式: 先把仍在运行的 task 标记为 cancelled
+        // 强制模式: 删除关联的所有 task 及其结果
         if force && !run.task_ids.is_empty() {
             if let Ok(task_ids) = serde_json::from_str::<Vec<String>>(&run.task_ids) {
                 for tid in &task_ids {
-                    let _ = sqlx::query(
-                        "UPDATE test_task SET status='cancelled', finished_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('pending','running')"
-                    ).bind(tid).execute(db).await;
+                    // 先删结果表
+                    let _ = sqlx::query("DELETE FROM website_result WHERE task_id=?").bind(tid).execute(db).await;
+                    let _ = sqlx::query("DELETE FROM video_result WHERE task_id=?").bind(tid).execute(db).await;
+                    let _ = sqlx::query("DELETE FROM download_result WHERE task_id=?").bind(tid).execute(db).await;
+                    let _ = sqlx::query("DELETE FROM ping_result WHERE task_id=?").bind(tid).execute(db).await;
+                    let _ = sqlx::query("DELETE FROM task_log WHERE task_id=?").bind(tid).execute(db).await;
+                    let _ = sqlx::query("DELETE FROM task_metric_config WHERE task_id=?").bind(tid).execute(db).await;
+                    // 再删任务
+                    let _ = sqlx::query("DELETE FROM test_task WHERE id=?").bind(tid).execute(db).await;
                 }
             }
         }
