@@ -268,6 +268,16 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
 
     // 增量迁移：给已有数据库补 test_count 列
     add_column_if_missing(pool, "website_result", "test_count", "INTEGER DEFAULT 1").await?;
+    add_column_if_missing(pool, "website_result", "html_size", "INTEGER").await?;
+    add_column_if_missing(pool, "website_result", "css_size", "INTEGER").await?;
+    add_column_if_missing(pool, "website_result", "js_size", "INTEGER").await?;
+    add_column_if_missing(pool, "website_result", "image_size", "INTEGER").await?;
+    add_column_if_missing(pool, "website_result", "font_size", "INTEGER").await?;
+    add_column_if_missing(pool, "website_result", "total_requests", "INTEGER").await?;
+    add_column_if_missing(pool, "website_result", "failed_requests", "INTEGER").await?;
+    add_column_if_missing(pool, "website_result", "lcp_ms", "REAL").await?;
+    add_column_if_missing(pool, "website_result", "cls", "REAL").await?;
+    add_column_if_missing(pool, "website_result", "tti_ms", "REAL").await?;
     add_column_if_missing(pool, "download_result", "test_count", "INTEGER DEFAULT 1").await?;
     add_column_if_missing(pool, "video_result", "test_count", "INTEGER DEFAULT 1").await?;
     add_column_if_missing(pool, "ping_result", "test_count", "INTEGER DEFAULT 1").await?;

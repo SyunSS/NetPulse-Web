@@ -48,6 +48,7 @@ pub fn export_website_xlsx(
     let headers = [
         "序号", "URL", "DNS解析时延(ms)", "DNS解析成功率(%)", "TCP连接时延(ms)",
         "访问成功率(%)", "首包时延(ms)", "首屏时延(ms)", "首页时延(ms)",
+        "总请求", "HTML(KB)", "CSS(KB)", "JS(KB)", "图片(KB)", "字体(KB)",
     ];
 
     for (col, h) in headers.iter().enumerate() {
@@ -69,6 +70,12 @@ pub fn export_website_xlsx(
         write_num(sheet, row, 6, r.ttfb_ms, row_fmt)?;
         write_num(sheet, row, 7, r.dom_content_loaded_ms, row_fmt)?;
         write_num(sheet, row, 8, r.load_event_ms, row_fmt)?;
+        write_num_i32(sheet, row, 9, r.total_requests, row_fmt)?;
+        write_kb(sheet, row, 10, r.html_size, row_fmt)?;
+        write_kb(sheet, row, 11, r.css_size, row_fmt)?;
+        write_kb(sheet, row, 12, r.js_size, row_fmt)?;
+        write_kb(sheet, row, 13, r.image_size, row_fmt)?;
+        write_kb(sheet, row, 14, r.font_size, row_fmt)?;
     }
 
     // === 自动列宽 ===
@@ -267,6 +274,13 @@ fn write_ok(sheet: &mut Worksheet, row: u32, col: u16, val: Option<i32>, fmt: &F
 fn write_success(sheet: &mut Worksheet, row: u32, col: u16, ok: bool, fmt: &Format) -> Result<(), XlsxError> {
     sheet.write_with_format(row, col, if ok { "100" } else { "0" }, fmt)?;
     Ok(())
+}
+
+fn write_kb(sheet: &mut Worksheet, row: u32, col: u16, val_bytes: Option<i32>, fmt: &Format) -> Result<(), XlsxError> {
+    match val_bytes {
+        Some(v) => { sheet.write_with_format(row, col, (v as f64 / 1024.0), fmt)?; Ok(()) }
+        None => { sheet.write_with_format(row, col, "-", fmt)?; Ok(()) }
+    }
 }
 
 // === CSV / JSON 导出 ===

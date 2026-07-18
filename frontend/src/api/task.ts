@@ -43,6 +43,16 @@ export interface WebsiteResult {
   first_paint_ms: number | null
   resource_count: number | null
   resource_total_size: number | null
+  html_size: number | null
+  css_size: number | null
+  js_size: number | null
+  image_size: number | null
+  font_size: number | null
+  total_requests: number | null
+  failed_requests: number | null
+  lcp_ms: number | null
+  cls: number | null
+  tti_ms: number | null
   final_url: string | null
   page_title: string | null
   screenshot_path: string | null

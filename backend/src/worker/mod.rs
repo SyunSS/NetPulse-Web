@@ -137,6 +137,9 @@ async fn run_website_task(
                     first_paint_ms: None, resource_count: None, resource_total_size: None,
                     final_url: None, page_title: None, screenshot_path: None,
                     error_msg: Some(e.to_string()),
+                    html_size: None, css_size: None, js_size: None, image_size: None, font_size: None,
+                    total_requests: None, failed_requests: None,
+                    lcp_ms: None, cls: None, tti_ms: None,
                     created_at: Utc::now().to_rfc3339(), test_count: Some(repeat_count as i32),
                 };
                 save_website_result(&db, &failed_result).await.ok();
@@ -197,6 +200,13 @@ async fn test_website_url(
     let mut page_open_times = Vec::with_capacity(repeat_count);
     let mut resource_counts = Vec::with_capacity(repeat_count);
     let mut resource_sizes = Vec::with_capacity(repeat_count);
+    let mut html_sizes = Vec::with_capacity(repeat_count);
+    let mut css_sizes = Vec::with_capacity(repeat_count);
+    let mut js_sizes = Vec::with_capacity(repeat_count);
+    let mut image_sizes = Vec::with_capacity(repeat_count);
+    let mut font_sizes = Vec::with_capacity(repeat_count);
+    let mut total_reqs = Vec::with_capacity(repeat_count);
+    let mut failed_reqs = Vec::with_capacity(repeat_count);
     let mut final_url: Option<String> = None;
     let mut page_title: Option<String> = None;
     let mut screenshot_path: Option<String> = None;
@@ -222,6 +232,13 @@ async fn test_website_url(
         if let Some(v) = browser.page_open_time_ms { page_open_times.push(v); }
         if let Some(v) = browser.resource_count { resource_counts.push(v); }
         if let Some(v) = browser.resource_total_size { resource_sizes.push(v); }
+        if let Some(v) = browser.html_size { html_sizes.push(v); }
+        if let Some(v) = browser.css_size { css_sizes.push(v); }
+        if let Some(v) = browser.js_size { js_sizes.push(v); }
+        if let Some(v) = browser.image_size { image_sizes.push(v); }
+        if let Some(v) = browser.font_size { font_sizes.push(v); }
+        if let Some(v) = browser.total_requests { total_reqs.push(v); }
+        if let Some(v) = browser.failed_requests { failed_reqs.push(v); }
         if page_title.is_none() { page_title = browser.page_title.clone(); }
 
         if screenshot_path.is_none() {
@@ -251,6 +268,16 @@ async fn test_website_url(
         first_paint_ms: avg(&fp_times),
         resource_count: avg_i32(&resource_counts),
         resource_total_size: avg_i32(&resource_sizes),
+        html_size: avg_i32(&html_sizes),
+        css_size: avg_i32(&css_sizes),
+        js_size: avg_i32(&js_sizes),
+        image_size: avg_i32(&image_sizes),
+        font_size: avg_i32(&font_sizes),
+        total_requests: avg_i32(&total_reqs),
+        failed_requests: avg_i32(&failed_reqs),
+        lcp_ms: None,
+        cls: None,
+        tti_ms: None,
         final_url,
         page_title,
         screenshot_path,
@@ -279,8 +306,9 @@ async fn save_website_result(db: &SqlitePool, result: &WebsiteResult) -> anyhow:
             id, task_id, url, dns_time_ms, dns_success, tcp_time_ms, tls_time_ms,
             http_status, ttfb_ms, fp_ms, fcp_ms, dom_content_loaded_ms, load_event_ms,
             page_open_time_ms, first_paint_ms, resource_count, resource_total_size,
+            html_size, css_size, js_size, image_size, font_size, total_requests, failed_requests,
             final_url, page_title, screenshot_path, error_msg, test_count, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(&result.id)
     .bind(&result.task_id)
@@ -299,6 +327,13 @@ async fn save_website_result(db: &SqlitePool, result: &WebsiteResult) -> anyhow:
     .bind(result.first_paint_ms)
     .bind(result.resource_count)
     .bind(result.resource_total_size)
+    .bind(result.html_size)
+    .bind(result.css_size)
+    .bind(result.js_size)
+    .bind(result.image_size)
+    .bind(result.font_size)
+    .bind(result.total_requests)
+    .bind(result.failed_requests)
     .bind(&result.final_url)
     .bind(&result.page_title)
     .bind(&result.screenshot_path)
@@ -449,6 +484,9 @@ async fn run_video_task(
                         first_paint_ms: None,
                         resource_count: None,
                         resource_total_size: result.video_size,
+                        html_size: None, css_size: None, js_size: None, image_size: None, font_size: None,
+                        total_requests: None, failed_requests: None,
+                        lcp_ms: None, cls: None, tti_ms: None,
                         final_url: None,
                         page_title: result.page_title.clone(),
                         screenshot_path: result.screenshot_path.clone(),

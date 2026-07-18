@@ -138,7 +138,7 @@ const stClass = (s: string) => `st st-${s}`
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
-            <th>URL</th><th>DNS解析时延(ms)</th><th>DNS解析成功率(%)</th><th>TCP连接时延(ms)</th><th>访问成功率(%)</th><th>首包时延(ms)</th><th>首屏时延(ms)</th><th>首页时延(ms)</th>
+            <th>URL</th><th>DNS解析时延(ms)</th><th>DNS解析成功率(%)</th><th>TCP连接时延(ms)</th><th>访问成功率(%)</th><th>首包时延(ms)</th><th>首屏时延(ms)</th><th>首页时延(ms)</th><th>总请求</th><th>HTML(KB)</th><th>CSS(KB)</th><th>JS(KB)</th><th>图片(KB)</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in websiteResults" :key="r.id">
@@ -150,6 +150,11 @@ const stClass = (s: string) => `st st-${s}`
               <td>{{ r.ttfb_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.dom_content_loaded_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.load_event_ms?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.total_requests ?? '-' }}</td>
+              <td>{{ r.html_size ? (r.html_size / 1024).toFixed(1) : '-' }}</td>
+              <td>{{ r.css_size ? (r.css_size / 1024).toFixed(1) : '-' }}</td>
+              <td>{{ r.js_size ? (r.js_size / 1024).toFixed(1) : '-' }}</td>
+              <td>{{ r.image_size ? (r.image_size / 1024).toFixed(1) : '-' }}</td>
             </tr>
           </tbody>
         </table>
