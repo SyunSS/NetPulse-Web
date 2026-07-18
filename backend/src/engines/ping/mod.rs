@@ -42,9 +42,9 @@ impl PingEngine {
 
         match icmp_result {
             Ok(Ok(mut r)) if r.success => { r.method = Some("icmp".into()); return r; }
-            Ok(Ok(r)) => debug!("ICMP 不通 (丢包{}%), 尝试 TCP 回退", r.packet_loss_rate),
-            Ok(Err(e)) => debug!("ICMP 失败: {}, 尝试 TCP 回退", e),
-            Err(e) => debug!("ICMP 执行异常: {}, 尝试 TCP 回退", e),
+            Ok(Ok(r)) => info!("ICMP 不通 {} (丢包{}%, rtts=0), 回退 TCP", r.host, r.packet_loss_rate),
+            Ok(Err(e)) => info!("ICMP 失败 {}, 回退 TCP", e),
+            Err(e) => info!("ICMP 异常 {}, 回退 TCP", e),
         }
 
         // 2. TCP :80
@@ -170,8 +170,10 @@ fn run_ping(host: &str, count: u32, timeout_secs: u64) -> Result<PingTestResult,
 /// TCP Ping: 连接指定端口，连 N 次取平均延迟
 async fn run_tcp_ping(host: &str, port: u16, count: u32) -> PingTestResult {
     let addr = format!("{}:{}", host, port);
+    let method = format!("tcp{}", port);
     let mut times: Vec<f64> = Vec::new();
     let mut fails = 0u32;
+    let mut last_err = String::new();
 
     for _ in 0..count {
         let start = Instant::now();
@@ -180,39 +182,37 @@ async fn run_tcp_ping(host: &str, port: u16, count: u32) -> PingTestResult {
                 times.push(start.elapsed().as_secs_f64() * 1000.0);
                 drop(stream);
             }
-            _ => { fails += 1; }
+            Ok(Err(e)) => { fails += 1; last_err = e.to_string(); }
+            Err(_timeout) => { fails += 1; last_err = "timeout".into(); }
         }
     }
 
+    info!("TCP ping {}:{} 结果: {}/{} 成功, 时延={:?}ms, err={}", host, port, times.len(), count,
+        if times.is_empty() { None } else { Some(times.iter().sum::<f64>() / times.len() as f64) }, last_err);
+
     if times.is_empty() {
         return PingTestResult {
-            host: host.to_string(),
-            avg_latency_ms: 0.0,
-            packet_loss_rate: 100.0,
-            jitter_ms: 0.0,
-            success: false,
-            method: Some(format!("tcp{}", port)),
-            error: Some(format!("TCP:{} 全部超时", port)),
+            host: host.to_string(), avg_latency_ms: 0.0, packet_loss_rate: 100.0,
+            jitter_ms: 0.0, success: false, method: Some(method),
+            error: Some(format!("TCP:{} {}, {}次全失败", port, last_err, count)),
         };
     }
 
     let avg = times.iter().sum::<f64>() / times.len() as f64;
     let loss = (fails as f64 / count as f64) * 100.0;
-    let mean = avg;
     let jitter = if times.len() > 1 {
-        let variance = times.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / times.len() as f64;
+        let variance = times.iter().map(|t| (t - avg).powi(2)).sum::<f64>() / times.len() as f64;
         variance.sqrt()
     } else { 0.0 };
-    let success = loss < 100.0;
 
     PingTestResult {
         host: host.to_string(),
         avg_latency_ms: (avg * 1000.0).round() / 1000.0,
         packet_loss_rate: (loss * 100.0).round() / 100.0,
         jitter_ms: (jitter * 1000.0).round() / 1000.0,
-        success,
-        method: Some(format!("tcp{}", port)),
-        error: if success { None } else { Some(format!("TCP:{} 连接失败", port)) },
+        success: loss < 100.0,
+        method: Some(method),
+        error: if loss >= 100.0 { Some(format!("TCP:{} 全部超时或拒绝", port)) } else { None },
     }
 }
 
