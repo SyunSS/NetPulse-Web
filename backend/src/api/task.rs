@@ -25,6 +25,7 @@ pub fn task_routes() -> Router<AppState> {
         .route("/:id/cancel", post(cancel_task))
         .route("/:id/retry", post(retry_task))
         .route("/:id", delete(delete_task))
+        .route("/batch-delete", post(batch_delete_tasks))
         .route("/import", post(import_tasks))
         .route("/template", get(download_template))
 }
@@ -390,28 +391,57 @@ fn file_response(bytes: Vec<u8>, content_type: &str, filename: &str) -> Response
         .unwrap()
 }
 
-/// 硬删除任务（仅 completed/failed/cancelled 可删除）
+/// 硬删除任务。?force=true 可跳过状态检查
 async fn delete_task(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Path(task_id): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<crate::utils::response::ApiResponse<()>>, AppError> {
+    let force = params.get("force").map(|s| s.as_str()) == Some("true");
     let task = TaskService::get_task(&state.db, &task_id).await
         .map_err(|_| AppError::not_found("任务不存在"))?;
     if task.user_id != claims.sub {
         return Err(AppError::unauthorized("无权删除"));
     }
-    if task.status == "pending" || task.status == "running" {
+    if !force && (task.status == "pending" || task.status == "running") {
         return Err(AppError::bad_request("请先取消运行中的任务再删除"));
     }
-    // 删关联数据
-    sqlx::query("DELETE FROM website_result WHERE task_id = ?").bind(&task_id).execute(&state.db).await.ok();
-    sqlx::query("DELETE FROM video_result WHERE task_id = ?").bind(&task_id).execute(&state.db).await.ok();
-    sqlx::query("DELETE FROM download_result WHERE task_id = ?").bind(&task_id).execute(&state.db).await.ok();
-    sqlx::query("DELETE FROM ping_result WHERE task_id = ?").bind(&task_id).execute(&state.db).await.ok();
-    sqlx::query("DELETE FROM task_log WHERE task_id = ?").bind(&task_id).execute(&state.db).await.ok();
-    sqlx::query("DELETE FROM task_metric_config WHERE task_id = ?").bind(&task_id).execute(&state.db).await.ok();
-    sqlx::query("DELETE FROM test_task WHERE id = ?").bind(&task_id).execute(&state.db).await
+    delete_task_data(&state.db, &task_id).await
         .map_err(|e| AppError::internal(&e.to_string()))?;
     Ok(Json(ok_with_msg("任务已删除", ())))
+}
+
+async fn delete_task_data(db: &sqlx::SqlitePool, task_id: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM website_result WHERE task_id = ?").bind(task_id).execute(db).await?;
+    sqlx::query("DELETE FROM video_result WHERE task_id = ?").bind(task_id).execute(db).await?;
+    sqlx::query("DELETE FROM download_result WHERE task_id = ?").bind(task_id).execute(db).await?;
+    sqlx::query("DELETE FROM ping_result WHERE task_id = ?").bind(task_id).execute(db).await?;
+    sqlx::query("DELETE FROM task_log WHERE task_id = ?").bind(task_id).execute(db).await?;
+    sqlx::query("DELETE FROM task_metric_config WHERE task_id = ?").bind(task_id).execute(db).await?;
+    sqlx::query("DELETE FROM test_task WHERE id = ?").bind(task_id).execute(db).await?;
+    Ok(())
+}
+
+/// 批量删除任务
+#[derive(Debug, Deserialize)]
+struct BatchDeleteRequest { task_ids: Vec<String> }
+
+async fn batch_delete_tasks(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Json(body): Json<BatchDeleteRequest>,
+) -> Result<Json<crate::utils::response::ApiResponse<serde_json::Value>>, AppError> {
+    let mut deleted = 0usize;
+    for tid in &body.task_ids {
+        let task = match TaskService::get_task(&state.db, tid).await {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if task.user_id != claims.sub { continue; }
+        if task.status == "pending" || task.status == "running" { continue; }
+        delete_task_data(&state.db, tid).await.ok();
+        deleted += 1;
+    }
+    Ok(Json(ok(serde_json::json!({"deleted": deleted, "total": body.task_ids.len()}))))
 }
