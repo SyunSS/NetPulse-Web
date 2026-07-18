@@ -147,9 +147,11 @@ async fn run_website_task(
         }
         let progress = ((i + 1) as f64 / total as f64 * 100.0);
         let _ = progress_tx.send(ProgressMessage::ProgressUpdate { task_id: task_id.clone(), progress });
+        update_task_progress(&db, task_id, progress).await.ok();
     }
 
     let _ = progress_tx.send(ProgressMessage::TaskCompleted { task_id: task_id.clone(), success_count, fail_count });
+    update_task_progress(&db, task_id, 100.0).await.ok();
     update_task_status(&db, task_id, "completed", None).await?;
     Ok(())
 }
