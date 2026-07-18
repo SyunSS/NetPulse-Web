@@ -111,6 +111,7 @@ export interface PingResult {
   jitter_ms: number | null
   success: number | null
   error_msg: string | null
+  method: string | null
   created_at: string
 }
 

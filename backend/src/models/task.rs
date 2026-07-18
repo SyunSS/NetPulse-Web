@@ -193,6 +193,7 @@ pub struct PingResult {
     pub jitter_ms: Option<f64>,
     pub success: Option<i32>,
     pub error_msg: Option<String>,
+    pub method: Option<String>,
     pub test_count: Option<i32>,
     pub created_at: String,
 }

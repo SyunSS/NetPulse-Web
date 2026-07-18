@@ -1,8 +1,8 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use tokio::net::TcpStream;
 use tracing::{debug, info};
-use chrono::Utc;
 
 /// Ping 测试结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12,6 +12,7 @@ pub struct PingTestResult {
     pub packet_loss_rate: f64,  // 0-100
     pub jitter_ms: f64,
     pub success: bool,
+    pub method: Option<String>,  // "icmp" | "tcp80" | "tcp443"
     pub error: Option<String>,
 }
 
@@ -26,44 +27,50 @@ impl PingEngine {
         Self { count: count.max(1).min(100), timeout }
     }
 
-    /// 执行 ping 测试
+    /// 执行 ping 测试（ICMP → TCP:80 → TCP:443 三级回退）
     pub async fn test_ping(&self, host: &str) -> PingTestResult {
         info!("Ping 测试开始: {}", host);
-
-        // 提取主机名（去掉端口和路径）
         let target = extract_host(host);
 
-        // 使用 tokio 的 spawn_blocking 执行同步的 ping 命令
+        // 1. ICMP
         let count = self.count;
         let timeout_secs = self.timeout.as_secs();
-        let target_clone = target.clone();
+        let icmp_target = target.clone();
+        let icmp_result = tokio::task::spawn_blocking(move || {
+            run_ping(&icmp_target, count, timeout_secs)
+        }).await;
 
-        let result = tokio::task::spawn_blocking(move || {
-            run_ping(&target_clone, count, timeout_secs)
-        })
-        .await;
+        match icmp_result {
+            Ok(Ok(mut r)) if r.success => { r.method = Some("icmp".into()); return r; }
+            Ok(Ok(r)) => debug!("ICMP 不通 (丢包{}%), 尝试 TCP 回退", r.packet_loss_rate),
+            Ok(Err(e)) => debug!("ICMP 失败: {}, 尝试 TCP 回退", e),
+            Err(e) => debug!("ICMP 执行异常: {}, 尝试 TCP 回退", e),
+        }
 
-        match result {
-            Ok(Ok(r)) => r,
-            Ok(Err(e)) => {
-                debug!("Ping 失败: {} - {}", target, e);
-                PingTestResult {
-                    host: target,
-                    avg_latency_ms: 0.0,
-                    packet_loss_rate: 100.0,
-                    jitter_ms: 0.0,
-                    success: false,
-                    error: Some(e),
-                }
-            }
-            Err(e) => PingTestResult {
-                host: target,
-                avg_latency_ms: 0.0,
-                packet_loss_rate: 100.0,
-                jitter_ms: 0.0,
-                success: false,
-                error: Some(format!("任务执行失败: {}", e)),
-            },
+        // 2. TCP :80
+        info!("TCP 回退: {}:80", target);
+        let tcp80 = run_tcp_ping(&target, 80, 5).await;
+        if tcp80.success {
+            return tcp80;
+        }
+        debug!("TCP:80 不通, 尝试 TCP:443");
+
+        // 3. TCP :443
+        info!("TCP 回退: {}:443", target);
+        let tcp443 = run_tcp_ping(&target, 443, 5).await;
+        if tcp443.success {
+            return tcp443;
+        }
+
+        // 全部失败
+        PingTestResult {
+            host: target,
+            avg_latency_ms: 0.0,
+            packet_loss_rate: 100.0,
+            jitter_ms: 0.0,
+            success: false,
+            method: None,
+            error: Some("ICMP/TCP80/TCP443 全部不通".into()),
         }
     }
 }
@@ -155,8 +162,58 @@ fn run_ping(host: &str, count: u32, timeout_secs: u64) -> Result<PingTestResult,
         packet_loss_rate: (packet_loss * 100.0).round() / 100.0,
         jitter_ms: (jitter * 1000.0).round() / 1000.0,
         success,
+        method: Some("icmp".into()),
         error: if success { None } else { Some("100% 丢包".to_string()) },
     })
+}
+
+/// TCP Ping: 连接指定端口，连 N 次取平均延迟
+async fn run_tcp_ping(host: &str, port: u16, count: u32) -> PingTestResult {
+    let addr = format!("{}:{}", host, port);
+    let mut times: Vec<f64> = Vec::new();
+    let mut fails = 0u32;
+
+    for _ in 0..count {
+        let start = Instant::now();
+        match tokio::time::timeout(Duration::from_secs(3), TcpStream::connect(addr.clone())).await {
+            Ok(Ok(stream)) => {
+                times.push(start.elapsed().as_secs_f64() * 1000.0);
+                drop(stream);
+            }
+            _ => { fails += 1; }
+        }
+    }
+
+    if times.is_empty() {
+        return PingTestResult {
+            host: host.to_string(),
+            avg_latency_ms: 0.0,
+            packet_loss_rate: 100.0,
+            jitter_ms: 0.0,
+            success: false,
+            method: Some(format!("tcp{}", port)),
+            error: Some(format!("TCP:{} 全部超时", port)),
+        };
+    }
+
+    let avg = times.iter().sum::<f64>() / times.len() as f64;
+    let loss = (fails as f64 / count as f64) * 100.0;
+    let mean = avg;
+    let jitter = if times.len() > 1 {
+        let variance = times.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / times.len() as f64;
+        variance.sqrt()
+    } else { 0.0 };
+    let success = loss < 100.0;
+
+    PingTestResult {
+        host: host.to_string(),
+        avg_latency_ms: (avg * 1000.0).round() / 1000.0,
+        packet_loss_rate: (loss * 100.0).round() / 100.0,
+        jitter_ms: (jitter * 1000.0).round() / 1000.0,
+        success,
+        method: Some(format!("tcp{}", port)),
+        error: if success { None } else { Some(format!("TCP:{} 连接失败", port)) },
+    }
 }
 
 /// 从 URL 提取主机名

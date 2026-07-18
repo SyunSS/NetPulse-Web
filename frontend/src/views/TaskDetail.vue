@@ -218,15 +218,16 @@ const stClass = (s: string) => `st st-${s}`
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
-            <th>目标</th><th>时延(ms)</th><th>丢包率(%)</th><th>抖动时延(ms)</th><th>状态</th>
+            <th>目标</th><th>检测方式</th><th>时延(ms)</th><th>丢包率(%)</th><th>抖动时延(ms)</th><th>状态</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in pingResults" :key="r.id">
               <td class="url-cell">{{ r.host }}</td>
+              <td>{{ r.method || 'ICMP' }}</td>
               <td>{{ r.avg_latency_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.packet_loss_rate?.toFixed(1) ?? '-' }}%</td>
               <td>{{ r.jitter_ms?.toFixed(1) ?? '-' }}</td>
-              <td><span :class="r.success===1 ? 'badge ok' : 'badge err'">{{ r.success===1 ? '成功' : '失败' }}</span></td>
+              <td><span :class="r.success===100 ? 'badge ok' : 'badge err'">{{ r.success===100 ? '成功' : '失败' }}</span></td>
             </tr>
           </tbody>
         </table>

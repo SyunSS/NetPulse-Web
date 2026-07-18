@@ -281,6 +281,7 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "download_result", "test_count", "INTEGER DEFAULT 1").await?;
     add_column_if_missing(pool, "video_result", "test_count", "INTEGER DEFAULT 1").await?;
     add_column_if_missing(pool, "ping_result", "test_count", "INTEGER DEFAULT 1").await?;
+    add_column_if_missing(pool, "ping_result", "method", "TEXT").await?;
 
     // 兜底：确保计划相关表一定存在（老数据库可能缺少）
     create_table_if_missing(pool, "task_plans",

@@ -779,10 +779,11 @@ async fn run_ping_task(
             avg_latency_ms: Some(result.avg_latency_ms),
             packet_loss_rate: Some(result.packet_loss_rate),
             jitter_ms: Some(result.jitter_ms),
-            success: Some(if result.success { 1 } else { 0 }),
+            success: Some(if result.success { 100 } else { 0 }),
             error_msg: result.error,
+            method: result.method.clone(),
             created_at: now,
-        test_count: None,
+            test_count: None,
         };
 
         save_ping_result(&db, &pr).await?;
@@ -803,11 +804,11 @@ async fn run_ping_task(
 
 async fn save_ping_result(db: &SqlitePool, result: &PingResult) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO ping_result (id, task_id, host, avg_latency_ms, packet_loss_rate, jitter_ms, success, error_msg, test_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO ping_result (id, task_id, host, avg_latency_ms, packet_loss_rate, jitter_ms, success, error_msg, method, test_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&result.id).bind(&result.task_id).bind(&result.host)
     .bind(result.avg_latency_ms).bind(result.packet_loss_rate).bind(result.jitter_ms)
-    .bind(result.success).bind(&result.error_msg).bind(result.test_count).bind(&result.created_at)
+    .bind(result.success).bind(&result.error_msg).bind(&result.method).bind(result.test_count).bind(&result.created_at)
     .execute(db).await?;
     Ok(())
 }
