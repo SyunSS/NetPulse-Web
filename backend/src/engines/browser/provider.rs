@@ -43,7 +43,7 @@ pub trait BrowserHandle: Send {
 
 /// 浏览器页面 — 操作单个标签页
 #[async_trait]
-pub trait BrowserPage: Send {
+pub trait BrowserPage: Send + Sync {
     async fn navigate_to(&self, url: &str) -> anyhow::Result<()>;
     async fn wait_for_load(&self) -> anyhow::Result<()>;
     fn evaluate_sync(&self, js: &str) -> anyhow::Result<serde_json::Value>;
