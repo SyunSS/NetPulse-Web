@@ -289,6 +289,9 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "video_result", "stutter_duration_ms", "REAL").await?;
     add_column_if_missing(pool, "video_result", "play_duration_sec", "REAL").await?;
     add_column_if_missing(pool, "video_result", "stutter_ratio", "REAL").await?;
+    add_column_if_missing(pool, "video_result", "video_width", "INTEGER").await?;
+    add_column_if_missing(pool, "video_result", "video_height", "INTEGER").await?;
+    add_column_if_missing(pool, "video_result", "video_duration_sec", "REAL").await?;
     add_column_if_missing(pool, "ping_result", "test_count", "INTEGER DEFAULT 1").await?;
     add_column_if_missing(pool, "ping_result", "method", "TEXT").await?;
 
