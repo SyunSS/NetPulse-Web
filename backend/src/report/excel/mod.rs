@@ -47,7 +47,7 @@ pub fn export_website_xlsx(
     // === 表头 ===
     let headers = [
         "序号", "URL", "DNS解析时延(ms)", "DNS解析成功率(%)", "TCP连接时延(ms)",
-        "访问成功率(%)", "TTFB(ms)", "FCP(ms)", "Load(ms)", "LCP(ms)",
+        "访问成功率(%)", "首包时延(ms)", "首屏时延(ms)", "首页时延(ms)", "LCP(ms)",
         "总请求", "总大小(KB)", "HTML(KB)", "CSS(KB)", "JS(KB)", "图片(KB)", "字体(KB)",
     ];
 
@@ -357,7 +357,7 @@ pub fn export_plan_run_xlsx(
         let sheet = workbook.add_worksheet().set_name("网站测试")?;
         let headers = [
             "URL", "DNS解析时延(ms)", "DNS解析成功率(%)", "TCP连接时延(ms)",
-            "访问成功率(%)", "TTFB(ms)", "FCP(ms)", "Load(ms)", "LCP(ms)",
+            "访问成功率(%)", "首包时延(ms)", "首屏时延(ms)", "首页时延(ms)", "LCP(ms)",
             "总请求", "总大小(KB)", "HTML(KB)", "CSS(KB)", "JS(KB)", "图片(KB)", "字体(KB)",
         ];
         for (col, h) in headers.iter().enumerate() {

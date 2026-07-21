@@ -85,10 +85,6 @@ impl BrowserEngine {
         // 启用 CDP 域
         let _ = page.send_cdp("Network.enable", serde_json::json!({}));
 
-        // 注入 LCP Observer (在导航前注入，确保生效)
-        let lcp_js = collectors::NetworkCollector::lcp_inject_js();
-        let _ = page.evaluate_sync(lcp_js);
-
         // 页面采集器
         let page_collector = std::sync::Arc::new(collectors::PageCollector::new());
 
@@ -100,6 +96,10 @@ impl BrowserEngine {
         if let Err(e) = page.wait_for_load().await {
             debug!("等待导航完成: {}", e);
         }
+
+        // 注入 LCP Observer (在目标页面加载后注入, buffered:true 捕获已发生事件)
+        let lcp_js = collectors::NetworkCollector::lcp_inject_js();
+        let _ = page.evaluate_sync(lcp_js);
 
         let nav_elapsed = total_start.elapsed().as_secs_f64() * 1000.0;
 

@@ -163,7 +163,7 @@ const stClass = (s: string) => `st st-${s}`
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
-            <th>URL</th><th>DNS(ms)</th><th>DNS成功率</th><th>TCP(ms)</th><th>访问率</th><th>TTFB(ms)</th><th>FCP(ms)</th><th>Load(ms)</th><th>LCP(ms)</th><th>总请求</th><th>总(KB)</th><th>HTML</th><th>CSS</th><th>JS</th><th>图片</th>
+            <th>URL</th><th>DNS解析时延(ms)</th><th>DNS解析成功率(%)</th><th>TCP连接时延(ms)</th><th>访问成功率(%)</th><th>首包时延(ms)</th><th>首屏时延(ms)</th><th>首页时延(ms)</th><th>LCP(ms)</th><th>总请求</th><th>总大小(KB)</th><th>HTML(KB)</th><th>CSS(KB)</th><th>JS(KB)</th><th>图片(KB)</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in websiteResults" :key="r.id">
