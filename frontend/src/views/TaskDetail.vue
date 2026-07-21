@@ -194,22 +194,21 @@ const stClass = (s: string) => `st st-${s}`
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
-            <th>URL</th><th>平台</th><th>DNS解析时延(ms)</th><th>DNS解析成功率(%)</th><th>TCP连接时延(ms)</th><th>HTTP响应时延(ms)</th><th>视频首次播放时延(ms)</th><th>视频卡顿率(%)</th><th>视频下载速率(Mbps)</th><th>视频播放成功率(%)</th><th>页面标题</th>
+            <th>URL</th><th>平台</th><th>方式</th><th>DNS(ms)</th><th>TCP(ms)</th><th>首帧(S)</th><th>卡顿次数</th><th>卡顿占比(%)</th><th>播放时长(S)</th><th>分辨率</th><th>丢帧</th><th>状态</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in videoResults" :key="r.id">
               <td class="url-cell">{{ r.url }}</td>
               <td>{{ r.platform || '-' }}</td>
-              <td>{{ r.dns_time_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ (r.dns_success ?? null) !== null ? r.dns_success + '%' : '-' }}</td>
-              <td>{{ r.tcp_time_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.http_response_ms?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.first_play_time_ms?.toFixed(0) ?? '-' }}</td>
-              <td>{{ r.buffer_rate?.toFixed(1) ?? '-' }}</td>
-              <td>{{ r.video_download_speed ? (r.video_download_speed / 1024).toFixed(2) : '-' }}</td>
-              <td>{{ r.play_success !== null ? (r.play_success === 1 ? '100' : '0') : '-' }}</td>
-              <td class="title-cell">{{ r.page_title || '-' }}</td>
-              <td class="title-cell">{{ r.page_title || '-' }}</td>
+              <td>{{ r.trigger_method || '-' }}</td>
+              <td>{{ r.dns_time_ms?.toFixed(0) ?? '-' }}</td>
+              <td>{{ r.tcp_time_ms?.toFixed(0) ?? '-' }}</td>
+              <td>{{ r.first_play_time_ms ? (r.first_play_time_ms / 1000).toFixed(2) : '-' }}</td>
+              <td>{{ r.stutter_count ?? '-' }}</td>
+              <td>{{ r.stutter_ratio?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.play_duration_sec?.toFixed(0) ?? '-' }}</td>
+              <td>{{ r.video_width ? r.video_width+'×'+r.video_height : '-' }}</td>
+              <td>{{ r.dropped_frames ?? '-' }}</td>
               <td><span :class="r.play_success===1 ? 'badge ok' : 'badge err'">{{ r.play_success===1 ? '成功' : '待确认' }}</span></td>
             </tr>
           </tbody>

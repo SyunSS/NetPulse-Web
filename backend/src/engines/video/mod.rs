@@ -2,6 +2,7 @@ pub mod cdp_handler;
 pub mod collector;
 pub mod playback;
 
+pub mod monitor;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -61,6 +62,15 @@ pub struct VideoTestResult {
     pub player_created: Option<bool>,
     pub media_events: Option<i32>,
     pub network_media_requests: Option<i32>,
+    pub stutter_count: Option<i32>,
+    pub stutter_duration_ms: Option<f64>,
+    pub play_duration_sec: Option<f64>,
+    pub stutter_ratio: Option<f64>,
+    pub video_width: Option<i32>,
+    pub video_height: Option<i32>,
+    pub video_duration_sec: Option<f64>,
+    pub resource_ip: Option<String>,
+    pub isp_info: Option<String>,
 }
 
 /// 视频测试引擎 — 通过 BrowserProvider trait
@@ -135,21 +145,15 @@ impl VideoEngine {
         // 6. 页面预处理（关闭 cookie/弹窗）
         page_preprocess(&*page).await;
 
-        // 6.5 注入视频事件监听 JS（轻量，用于补充 first_play / buffer 统计）
+        // 6.5 注入视频轮询监控 (首帧/卡顿/分辨率/播放时长)
+        let _ = page.evaluate_sync(monitor::video_monitor_inject_js());
         let _ = page.evaluate_sync(
             r#"(function(){
-                var v = document.querySelector('video');
-                if (!v) return;
-                window.__videoStats = window.__videoStats || { first_play_time_ms: null, buffer_count: 0, total_buffer_time_ms: 0, _buffer_start: null, _start: performance.now() };
-                var s = window.__videoStats;
-                v.addEventListener('playing', function(){ if (s.first_play_time_ms===null) s.first_play_time_ms = performance.now()-s._start; });
-                v.addEventListener('waiting', function(){ s.buffer_count++; s._buffer_start = performance.now(); });
-                v.addEventListener('playing', function(){ if (s._buffer_start!==null){ s.total_buffer_time_ms += performance.now()-s._buffer_start; s._buffer_start=null; }});
-                try { v.play().catch(function(){}); } catch(e){}
+                try { document.querySelector('video')?.play().catch(function(){}); } catch(e){}
             })()"#
         );
 
-        // 7. PlaybackController: 多级播放触发
+        // 7. PlaybackController: 多级播放触发 + 轮询
         let max_wait = if platform_cfg.is_detect_only() { 10 } else { 60 };
         let mut ctrl = playback::PlaybackController::new(max_wait);
 
@@ -161,11 +165,22 @@ impl VideoEngine {
             );
         };
 
-        // 轮询检查播放器状态 + 等待
-        let check_duration = if platform_cfg.is_detect_only() { Duration::from_secs(3) } else { Duration::from_secs(6) };
-        for _ in 0..((max_wait / 2) as usize) {
-            tokio::time::sleep(check_duration.min(Duration::from_secs(2))).await;
-            // 检查是否有媒体请求
+        // 8. 轮询监控: 1s间隔采集视频状态 (首帧/卡顿/分辨率)
+        let mut monitor_data = serde_json::json!({});
+        let poll_js = monitor::video_poll_js();
+        let mut poll_count = 0u32;
+        let max_polls = if platform_cfg.is_detect_only() { 5 } else { 30 };
+        for _ in 0..max_polls {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            poll_count += 1;
+            // 轮询视频状态
+            let poll_result: serde_json::Value = page.evaluate_sync(poll_js)
+                .ok().and_then(|v| v.as_str().and_then(|s| serde_json::from_str(s).ok()))
+                .unwrap_or(serde_json::json!({"alive":false}));
+            let ended = poll_result.get("ended").and_then(|v| v.as_bool()).unwrap_or(false);
+            if ended { break; }
+            monitor_data = poll_result;
+            // 检查网络请求
             let net = cdp_handler.network.snapshot();
             if net.segment_count > 0 { ctrl.on_network_media(); }
         }
@@ -263,6 +278,17 @@ impl VideoEngine {
             player_created: Some(diag.player_created),
             media_events: Some(diag.media_event_count as i32),
             network_media_requests: Some(diag.network_media_request_count as i32),
+            // 视频监控数据
+            stutter_count: monitor_data.get("sc").and_then(|v| v.as_i64()).map(|x| x as i32).or(Some(0)),
+            stutter_duration_ms: monitor_data.get("sd").and_then(|v| v.as_f64()),
+            stutter_ratio: monitor_data.get("sd").and_then(|v| v.as_f64()).map(|sd| {
+                let play_sec = monitor_data.get("ct").and_then(|v| v.as_f64()).unwrap_or(1.0); (sd / 1000.0 / play_sec.max(0.1) * 100.0)
+            }),
+            play_duration_sec: monitor_data.get("ct").and_then(|v| v.as_f64()),
+            video_width: monitor_data.get("vw").and_then(|v| v.as_i64()).map(|x| x as i32),
+            video_height: monitor_data.get("vh").and_then(|v| v.as_i64()).map(|x| x as i32),
+            video_duration_sec: monitor_data.get("vdur").and_then(|v| v.as_f64()),
+            resource_ip: None, isp_info: None,
             ..Default::default()
         }
     }

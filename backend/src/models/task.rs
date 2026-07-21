@@ -173,6 +173,14 @@ pub struct VideoResult {
     pub page_title: Option<String>,
     pub error_msg: Option<String>,
     pub test_count: Option<i32>,
+    pub trigger_method: Option<String>,
+    pub stutter_count: Option<i32>,
+    pub stutter_duration_ms: Option<f64>,
+    pub play_duration_sec: Option<f64>,
+    pub stutter_ratio: Option<f64>,
+    pub video_width: Option<i32>,
+    pub video_height: Option<i32>,
+    pub video_duration_sec: Option<f64>,
     pub created_at: String,
 }
 

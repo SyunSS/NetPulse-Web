@@ -79,6 +79,14 @@ export interface VideoResult {
   buffer_rate: number | null
   play_success: number | null
   video_download_speed: number | null
+  trigger_method: string | null
+  stutter_count: number | null
+  stutter_duration_ms: number | null
+  play_duration_sec: number | null
+  stutter_ratio: number | null
+  video_width: number | null
+  video_height: number | null
+  video_duration_sec: number | null
   video_size: number | null
   video_duration_ms: number | null
   dropped_frames: number | null
