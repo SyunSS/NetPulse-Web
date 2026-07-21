@@ -680,8 +680,8 @@ async fn save_video_result(db: &SqlitePool, result: &VideoResult) -> anyhow::Res
             id, task_id, url, platform, dns_time_ms, dns_success, tcp_time_ms, http_response_ms,
             first_play_time_ms, buffer_count, total_buffer_time_ms, buffer_rate,
             play_success, video_download_speed, video_size, video_duration_ms,
-            dropped_frames, decoded_frames, screenshot_path, page_title, error_msg, test_count, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            dropped_frames, decoded_frames, screenshot_path, page_title, error_msg, test_count, trigger_method, stutter_count, stutter_duration_ms, play_duration_sec, stutter_ratio, video_width, video_height, video_duration_sec, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(&result.id)
     .bind(&result.task_id)
