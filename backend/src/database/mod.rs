@@ -278,6 +278,10 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "website_result", "lcp_ms", "REAL").await?;
     add_column_if_missing(pool, "website_result", "cls", "REAL").await?;
     add_column_if_missing(pool, "website_result", "tti_ms", "REAL").await?;
+    add_column_if_missing(pool, "website_result", "site_size_kb", "REAL").await?;
+    add_column_if_missing(pool, "website_result", "avg_speed_kbps", "REAL").await?;
+    add_column_if_missing(pool, "website_result", "total_speed_kbps", "REAL").await?;
+    add_column_if_missing(pool, "website_result", "first_screen_ratio", "REAL").await?;
     add_column_if_missing(pool, "download_result", "test_count", "INTEGER DEFAULT 1").await?;
     add_column_if_missing(pool, "video_result", "test_count", "INTEGER DEFAULT 1").await?;
     add_column_if_missing(pool, "ping_result", "test_count", "INTEGER DEFAULT 1").await?;

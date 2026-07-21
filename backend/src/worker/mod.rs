@@ -140,6 +140,7 @@ async fn run_website_task(
                     html_size: None, css_size: None, js_size: None, image_size: None, font_size: None,
                     total_requests: None, failed_requests: None,
                     lcp_ms: None, cls: None, tti_ms: None,
+                    site_size_kb: None, avg_speed_kbps: None, total_speed_kbps: None, first_screen_ratio: None,
                     created_at: Utc::now().to_rfc3339(), test_count: Some(repeat_count as i32),
                 };
                 save_website_result(&db, &failed_result).await.ok();
@@ -214,6 +215,9 @@ async fn test_website_url(
     let mut font_sizes = Vec::with_capacity(repeat_count);
     let mut total_reqs = Vec::with_capacity(repeat_count);
     let mut failed_reqs = Vec::with_capacity(repeat_count);
+    let mut lcp_times = Vec::with_capacity(repeat_count);
+    let mut site_sizes_kb = Vec::with_capacity(repeat_count);
+    let mut avg_speeds = Vec::with_capacity(repeat_count);
     let mut final_url: Option<String> = None;
     let mut page_title: Option<String> = None;
     let mut screenshot_path: Option<String> = None;
@@ -246,6 +250,9 @@ async fn test_website_url(
         if let Some(v) = browser.font_size { font_sizes.push(v); }
         if let Some(v) = browser.total_requests { total_reqs.push(v); }
         if let Some(v) = browser.failed_requests { failed_reqs.push(v); }
+        if let Some(v) = browser.lcp_ms { lcp_times.push(v); }
+        if let Some(v) = browser.site_size_kb { site_sizes_kb.push(v); }
+        if let Some(v) = browser.avg_speed_kbps { avg_speeds.push(v); }
         if page_title.is_none() { page_title = browser.page_title.clone(); }
 
         if screenshot_path.is_none() {
@@ -282,9 +289,13 @@ async fn test_website_url(
         font_size: avg_i32(&font_sizes),
         total_requests: avg_i32(&total_reqs),
         failed_requests: avg_i32(&failed_reqs),
-        lcp_ms: None,
+        lcp_ms: avg(&lcp_times),
         cls: None,
         tti_ms: None,
+        site_size_kb: avg(&site_sizes_kb),
+        avg_speed_kbps: avg(&avg_speeds),
+        total_speed_kbps: None,
+        first_screen_ratio: None,
         final_url,
         page_title,
         screenshot_path,
@@ -314,8 +325,9 @@ async fn save_website_result(db: &SqlitePool, result: &WebsiteResult) -> anyhow:
             http_status, ttfb_ms, fp_ms, fcp_ms, dom_content_loaded_ms, load_event_ms,
             page_open_time_ms, first_paint_ms, resource_count, resource_total_size,
             html_size, css_size, js_size, image_size, font_size, total_requests, failed_requests,
+            lcp_ms, site_size_kb, avg_speed_kbps, total_speed_kbps, first_screen_ratio,
             final_url, page_title, screenshot_path, error_msg, test_count, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(&result.id)
     .bind(&result.task_id)
@@ -341,6 +353,11 @@ async fn save_website_result(db: &SqlitePool, result: &WebsiteResult) -> anyhow:
     .bind(result.font_size)
     .bind(result.total_requests)
     .bind(result.failed_requests)
+    .bind(result.lcp_ms)
+    .bind(result.site_size_kb)
+    .bind(result.avg_speed_kbps)
+    .bind(result.total_speed_kbps)
+    .bind(result.first_screen_ratio)
     .bind(&result.final_url)
     .bind(&result.page_title)
     .bind(&result.screenshot_path)
@@ -508,6 +525,7 @@ async fn run_video_task(
                         html_size: None, css_size: None, js_size: None, image_size: None, font_size: None,
                         total_requests: None, failed_requests: None,
                         lcp_ms: None, cls: None, tti_ms: None,
+                        site_size_kb: None, avg_speed_kbps: None, total_speed_kbps: None, first_screen_ratio: None,
                         final_url: None,
                         page_title: result.page_title.clone(),
                         screenshot_path: result.screenshot_path.clone(),
