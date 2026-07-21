@@ -53,6 +53,10 @@ export interface WebsiteResult {
   lcp_ms: number | null
   cls: number | null
   tti_ms: number | null
+  site_size_kb: number | null
+  avg_speed_kbps: number | null
+  total_speed_kbps: number | null
+  first_screen_ratio: number | null
   final_url: string | null
   page_title: string | null
   screenshot_path: string | null
