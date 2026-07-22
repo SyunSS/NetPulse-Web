@@ -109,10 +109,15 @@ pub struct JwtConfig {
 }
 
 impl AppConfig {
-    /// 加载配置文件
+    /// 加载配置文件（优先 config/config.toml，兜底 config.toml）
     pub fn load() -> anyhow::Result<Self> {
+        let config_path = if std::path::Path::new("config/config.toml").exists() {
+            "config/config.toml"
+        } else {
+            "config.toml"
+        };
         let config = Config::builder()
-            .add_source(File::with_name("config.toml").required(false))
+            .add_source(File::with_name(config_path).required(false))
             .add_source(config::Environment::with_prefix("NETPULSE").separator("__"))
             .build()?;
 

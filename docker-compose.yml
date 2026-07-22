@@ -18,6 +18,8 @@ services:
       - ./data:/app/data
       # 日志目录
       - ./logs:/app/logs
+      # 配置目录（首次启动自动创建默认 config.toml）
+      - ./config:/app/config
     networks:
       - netpulse-net
     restart: unless-stopped

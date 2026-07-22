@@ -26,6 +26,15 @@ use crate::worker::TaskWorker;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // 确保 config/config.toml 存在，不存在则写入默认配置
+    let config_dir = std::path::Path::new("config");
+    let config_file = config_dir.join("config.toml");
+    if !config_file.exists() {
+        std::fs::create_dir_all(config_dir)?;
+        std::fs::write(&config_file, include_str!("../config.toml"))?;
+        println!("默认配置文件已创建: {}", config_file.display());
+    }
+
     let config = AppConfig::load()?;
 
     init_logging(&config.logging);
