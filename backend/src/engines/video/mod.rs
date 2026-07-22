@@ -1,5 +1,11 @@
 pub mod browser;
-pub mod cdp;
+pub mod cdp {
+    pub mod media;
+    pub mod network;
+    pub mod performance;
+    pub mod runtime;
+    pub mod page;
+}
 pub mod diagnostics;
 pub mod events;
 pub mod hooks;
@@ -231,8 +237,8 @@ impl VideoEngine {
         >().await {
             tokio::spawn(async move {
                 let collector = cdp::media::MediaCollector::new(tx.clone());
-                while let Some(Ok(event)) = stream.next().await {
-                    collector.handle_player_created(event);
+                while let Some(event) = stream.next().await {
+                    collector.handle_player_created(event.as_ref().clone());
                 }
             });
         }
@@ -243,8 +249,8 @@ impl VideoEngine {
         >().await {
             tokio::spawn(async move {
                 let collector = cdp::media::MediaCollector::new(tx.clone());
-                while let Some(Ok(event)) = stream.next().await {
-                    collector.handle_events_added(event);
+                while let Some(event) = stream.next().await {
+                    collector.handle_events_added(event.as_ref().clone());
                 }
             });
         }
@@ -255,8 +261,8 @@ impl VideoEngine {
         >().await {
             tokio::spawn(async move {
                 let collector = cdp::media::MediaCollector::new(tx.clone());
-                while let Some(Ok(event)) = stream.next().await {
-                    collector.handle_properties_changed(event);
+                while let Some(event) = stream.next().await {
+                    collector.handle_properties_changed(event.as_ref().clone());
                 }
             });
         }
@@ -267,8 +273,8 @@ impl VideoEngine {
         >().await {
             tokio::spawn(async move {
                 let collector = cdp::network::NetworkCollector::new(tx.clone());
-                while let Some(Ok(event)) = stream.next().await {
-                    collector.handle_request_will_be_sent(event);
+                while let Some(event) = stream.next().await {
+                    collector.handle_request_will_be_sent(event.as_ref().clone());
                 }
             });
         }
@@ -279,8 +285,8 @@ impl VideoEngine {
         >().await {
             tokio::spawn(async move {
                 let collector = cdp::network::NetworkCollector::new(tx.clone());
-                while let Some(Ok(event)) = stream.next().await {
-                    collector.handle_response_received(event);
+                while let Some(event) = stream.next().await {
+                    collector.handle_response_received(event.as_ref().clone());
                 }
             });
         }
@@ -291,8 +297,8 @@ impl VideoEngine {
         >().await {
             tokio::spawn(async move {
                 let collector = cdp::network::NetworkCollector::new(tx.clone());
-                while let Some(Ok(event)) = stream.next().await {
-                    collector.handle_data_received(event);
+                while let Some(event) = stream.next().await {
+                    collector.handle_data_received(event.as_ref().clone());
                 }
             });
         }
@@ -303,19 +309,17 @@ impl VideoEngine {
         >().await {
             tokio::spawn(async move {
                 let collector = cdp::runtime::RuntimeCollector::new(tx.clone());
-                while let Some(Ok(event)) = stream.next().await {
-                    collector.handle_console_api_called(event);
+                while let Some(event) = stream.next().await {
+                    collector.handle_console_api_called(event.as_ref().clone());
                 }
             });
         }
 
-        let tx = event_tx.clone();
         if let Ok(mut stream) = page.event_listener::<
             chromiumoxide::cdp::browser_protocol::page::EventLoadEventFired
         >().await {
             tokio::spawn(async move {
-                let _tx = tx.clone();
-                while let Some(Ok(_event)) = stream.next().await {
+                while let Some(_event) = stream.next().await {
                     info!("页面 Load 事件触发");
                 }
             });

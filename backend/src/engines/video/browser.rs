@@ -1,6 +1,7 @@
 use anyhow::Context;
 use chromiumoxide::{Browser, BrowserConfig as ChromeBrowserConfig};
 use chromiumoxide::page::Page;
+use futures::StreamExt;
 use tracing::info;
 
 use crate::config::VideoBrowserConfig;
