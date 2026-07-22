@@ -42,7 +42,8 @@ pub async fn launch_browser(config: &BrowserConfig) -> anyhow::Result<chromiumox
     let mut builder = chromiumoxide::BrowserConfig::builder()
         .no_sandbox()
         .window_size(1920, 1080)
-        .chrome_executable(&config.path);
+        .chrome_executable(&config.path)
+        .arg("--log-level=0");
 
     if !config.headless {
         builder = builder.with_head();

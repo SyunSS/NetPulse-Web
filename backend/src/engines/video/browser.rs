@@ -21,6 +21,7 @@ impl ChromiumoxideBrowser {
             .arg("--mute-audio")
             .arg("--disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies")
             .arg("--disable-gpu")
+            .arg("--log-level=0")
             .chrome_executable(&config.path);
 
         if !config.headless {

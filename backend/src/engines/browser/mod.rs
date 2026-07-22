@@ -89,8 +89,6 @@ impl BrowserEngine {
 
         let perf_js = collectors::NetworkCollector::collect_js();
         let perf_data: serde_json::Value = page.evaluate(perf_js).await
-            .ok()
-            .and_then(|v| v.as_str().and_then(|s| serde_json::from_str(s).ok()))
             .unwrap_or(serde_json::Value::Null);
         let net_metrics = collectors::NetworkCollector::parse(perf_data.clone());
 
