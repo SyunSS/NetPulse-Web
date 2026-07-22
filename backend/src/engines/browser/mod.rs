@@ -43,7 +43,7 @@ pub struct BrowserResult {
     pub first_screen_ratio: Option<f64>,
 }
 
-/// 浏览器引擎 — 直接使用 headless_chrome
+/// 浏览器引擎 — 使用 chromiumoxide（与视频引擎共用同一 CDP crate）
 pub struct BrowserEngine {
     chrome_config: BrowserConfig,
     timeout: Duration,
@@ -59,29 +59,27 @@ impl BrowserEngine {
         info!("浏览器测试开始: {}", url);
         let total_start = std::time::Instant::now();
 
-        let browser = match provider::launch_browser(&self.chrome_config) {
+        let browser = match provider::launch_browser(&self.chrome_config).await {
             Ok(b) => b,
             Err(e) => { error!("浏览器启动失败: {}", e); return err_result(&e.to_string()); }
         };
-        let page = match provider::new_page(&browser) {
+        let page = match provider::new_page(&browser).await {
             Ok(p) => p,
             Err(e) => { error!("创建页面失败: {}", e); return err_result(&e.to_string()); }
         };
 
-        let _ = page.send_cdp("Network.enable", serde_json::json!({}));
-
         let page_collector = Arc::new(collectors::PageCollector::new());
 
         page_collector.record_navigation();
-        if let Err(e) = page.navigate_to(url) {
+        if let Err(e) = page.navigate_to(url).await {
             error!("导航失败: {}", e); return err_result(&e.to_string());
         }
-        if let Err(e) = page.wait_for_load() {
+        if let Err(e) = page.wait_for_load().await {
             debug!("等待导航完成: {}", e);
         }
 
         let lcp_js = collectors::NetworkCollector::lcp_inject_js();
-        let _ = page.evaluate_sync(lcp_js);
+        let _ = page.evaluate(lcp_js).await;
 
         let nav_elapsed = total_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -90,17 +88,18 @@ impl BrowserEngine {
         page_collector.record_load();
 
         let perf_js = collectors::NetworkCollector::collect_js();
-        let perf_data: serde_json::Value = page.evaluate_sync(perf_js)
-            .ok().and_then(|v| v.as_str().and_then(|s| serde_json::from_str(s).ok()))
+        let perf_data: serde_json::Value = page.evaluate(perf_js).await
+            .ok()
+            .and_then(|v| v.as_str().and_then(|s| serde_json::from_str(s).ok()))
             .unwrap_or(serde_json::Value::Null);
         let net_metrics = collectors::NetworkCollector::parse(perf_data.clone());
 
-        let title = page.evaluate_sync("document.title").ok()
+        let title = page.evaluate("document.title").await.ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()));
-        let final_url = page.evaluate_sync("window.location.href").ok()
+        let final_url = page.evaluate("window.location.href").await.ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()));
 
-        let screenshot = page.screenshot().ok();
+        let screenshot = page.screenshot().await.ok();
 
         let pg = page_collector.snapshot();
 
@@ -157,6 +156,7 @@ fn err_result(msg: &str) -> BrowserResult {
         total_requests: None, failed_requests: None,
         lcp_ms: None, cls: None, tti_ms: None,
         nav_dns_ms: None, nav_connect_ms: None, nav_ttfb_ms: None,
-        site_size_kb: None, avg_speed_kbps: None, total_speed_kbps: None, first_screen_ratio: None,
+        site_size_kb: None, avg_speed_kbps: None, total_speed_kbps: None,
+        first_screen_ratio: None,
     }
 }

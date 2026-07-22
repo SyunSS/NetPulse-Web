@@ -27,11 +27,15 @@ Single binary: backend serves `frontend-dist/` if present, else API-only. Nginx 
 | `backend/src/api/` | Axum route handlers (auth, task, plan, admin, ws, metrics) |
 | `backend/src/engines/` | Test engines: ping, dns, http, download, website, video |
 | `backend/src/engines/browser/` | Website testing via `headless_chrome` directly |
+| `backend/src/engines/video/` | Video engine: CDP collectors, JS hooks, player adapters |
 | `backend/src/worker/` | `TaskWorker` — mpsc-receiver, spawns per-type test |
 | `backend/src/scheduler/` | `PlanScheduler` — cron-based, checks every 60s |
 | `backend/src/database/` | SQLite init + inline migrations (14 tables) |
+| `backend/src/services/` | Business logic (auth, task, plan services) |
+| `backend/src/models/` | Data structs for DB rows and API payloads |
 | `frontend/src/views/` | Vue pages (Dashboard, CreateTask, Plans, TaskDetail, etc.) |
 | `frontend/src/router/` | Auth guard, history mode |
+| `frontend/src/stores/` | Pinia stores |
 
 ## Key Details
 
@@ -40,8 +44,9 @@ Single binary: backend serves `frontend-dist/` if present, else API-only. Nginx 
 - **DB**: SQLite with WAL, schema created inline (no sqlx migrations). `add_column_if_missing` for incremental schema changes.
 - **Browser (Website)**: `headless_chrome` crate used directly, no trait abstraction. `ChromePage` + `launch_browser()`/`new_page()` in `browser/provider.rs`.
 - **Browser (Video)**: `chromiumoxide` crate (async) — dedicated `[video_browser]` config section with separate chromium path.
-- **Video**: New architecture — `ChromiumoxideBrowser` → CDP collectors (Media/Network/Performance/Runtime/Page) + JS Hook manager (HTMLMediaElement/fetch/XHR/MediaSource/MutationObserver) + PlayerDetector (Generic/Bilibili/YouTube via `PlayerAdapter` trait) + `MetricCollector` with unified `VideoEvent` pipeline. Player detection moved into `players/registry.rs`, no longer in config.
+- **Video**: `ChromiumoxideBrowser` → CDP collectors (`cdp/media.rs`, `network.rs`, `performance.rs`, `runtime.rs`, `page.rs`) + JS hooks (`hooks/`) + PlayerAdapter trait (`players/registry.rs` dispatches to Bilibili/YouTube/Generic). Player detection is code-driven, not config-driven.
 - **VideoConfig**: `video_selector` and `wait_seconds` removed from `[[video_platforms]]`. Detection logic handled by `PlayerAdapter::detect()`. `detect_only` flag retained for Netflix.
+- **Metrics system**: `metric_definition` table seeded with 16 built-in metrics (dns_time, tcp_time, lcp, cls, etc.). `metric_profile` groups metrics per user. `task_metric_config` binds selected metrics to a task. API at `/api/metrics/*`.
 - **Chrome**: Requires `chromium` binary at the configured path. Sandbox disabled (`--no-sandbox`).
 - **Ping**: ICMP primary, TCP SYN fallback.
 - **Tests**: Minimal — only `dns/mod.rs` and `ping/mod.rs` have `#[cfg(test)]` blocks. No integration test harness.

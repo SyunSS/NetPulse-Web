@@ -54,9 +54,7 @@ reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], defau
 # DNS 解析
 hickory-resolver = "0.24"
 
-# 浏览器 CDP（网页测试）
-headless_chrome = "1.0"
-# 浏览器 CDP（视频测试）
+# 浏览器 CDP（网页 + 视频测试共用）
 chromiumoxide = { version = "0.9" }
 
 # 异步 trait
