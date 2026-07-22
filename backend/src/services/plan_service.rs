@@ -284,9 +284,13 @@ impl PlanService {
             if opts.is_null() { opts = serde_json::json!({}); }
             opts["repeat_count"] = serde_json::json!(item.repeat_count);
 
+            // 解析 urls
+            let urls: Vec<String> = serde_json::from_str(&item.urls).unwrap_or_default();
+
             let config = serde_json::json!({
                 "plan_id": plan_id,
                 "plan_run_id": plan_run_id,
+                "urls": &urls,
                 "options": &opts,
             });
 
@@ -300,9 +304,6 @@ impl PlanService {
             .bind(&now)
             .execute(db)
             .await?;
-
-            // 解析 urls
-            let urls: Vec<String> = serde_json::from_str(&item.urls).unwrap_or_default();
 
             // 派发到 Worker
             let job = TaskJob {
