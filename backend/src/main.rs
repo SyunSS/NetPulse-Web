@@ -152,7 +152,9 @@ fn init_logging(log_cfg: &crate::config::LoggingConfig) {
             }
         }
         (false, false) => {
-            filter.init();
+            tracing_subscriber::registry()
+                .with(filter)
+                .init();
         }
     }
 }
