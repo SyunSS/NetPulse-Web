@@ -128,9 +128,12 @@ impl PlanScheduler {
             if opts.is_null() { opts = serde_json::json!({}); }
             opts["repeat_count"] = serde_json::json!(item.repeat_count);
 
+            let urls: Vec<String> = serde_json::from_str(&item.urls).unwrap_or_default();
+
             let config = serde_json::json!({
                 "plan_id": plan.id,
                 "plan_run_id": plan_run_id,
+                "urls": &urls,
                 "options": &opts,
             });
 
@@ -140,8 +143,6 @@ impl PlanScheduler {
             .bind(&task_id).bind(&plan.user_id).bind(&item.task_type)
             .bind(config.to_string()).bind(&now)
             .execute(&self.db).await?;
-
-            let urls: Vec<String> = serde_json::from_str(&item.urls).unwrap_or_default();
             let job = TaskJob {
                 task_id: task_id.clone(), user_id: plan.user_id.clone(),
                 task_type: item.task_type.clone(), urls,
