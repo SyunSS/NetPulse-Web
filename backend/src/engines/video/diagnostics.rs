@@ -58,25 +58,25 @@ impl DiagnosticLogger {
                 info!("[VideoEngine +{:.0}ms] 缓冲开始 player_id={:?}", elapsed, player_id);
             }
             VideoEvent::BufferEnded { player_id, duration_ms, .. } => {
-                info!("[VideoEngine +{:.0}ms] 缓冲结束 player_id={:?}, duration={:.0f}ms", elapsed, player_id, duration_ms);
+                info!("[VideoEngine +{:.0}ms] 缓冲结束 player_id={:?}, duration={}ms", elapsed, player_id, duration_ms);
             }
             VideoEvent::ResolutionChanged { width, height, .. } => {
                 info!("[VideoEngine +{:.0}ms] 分辨率变化: {}x{}", elapsed, width, height);
             }
             VideoEvent::BitrateChanged { video_kbps, audio_kbps, .. } => {
-                info!("[VideoEngine +{:.0}ms] 码率变化: video={:.0f}kbps, audio={:.0f}kbps", elapsed, video_kbps, audio_kbps);
+                info!("[VideoEngine +{:.0}ms] 码率变化: video={}kbps, audio={}kbps", elapsed, video_kbps, audio_kbps);
             }
             VideoEvent::DroppedFramesChanged { dropped, decoded, .. } => {
                 info!("[VideoEngine +{:.0}ms] 丢帧: dropped={}, decoded={}", elapsed, dropped, decoded);
             }
             VideoEvent::FpsChanged { fps, .. } => {
-                info!("[VideoEngine +{:.0}ms] FPS: {:.1f}", elapsed, fps);
+                info!("[VideoEngine +{:.0}ms] FPS: {:.1}", elapsed, fps);
             }
             VideoEvent::CodecDetected { video_codec, audio_codec, mime_type, .. } => {
                 info!("[VideoEngine +{:.0}ms] 编码: video={}, audio={}, mime={}", elapsed, video_codec, audio_codec, mime_type);
             }
-            VideoEvent::SegmentLoaded { url, host, size_bytes, .. } => {
-                info!("[VideoEngine +{:.0}ms] 分片加载: host={}, size={}B, url={}", elapsed, host, size_bytes, url);
+            VideoEvent::SegmentLoaded { url: _, host, size_bytes, .. } => {
+                info!("[VideoEngine +{:.0}ms] 分片加载: host={}, size={}B", elapsed, host, size_bytes);
             }
             VideoEvent::CdnDetected { host, cdn_node, .. } => {
                 info!("[VideoEngine +{:.0}ms] CDN 节点: host={}, cdn={}", elapsed, host, cdn_node);
@@ -91,7 +91,7 @@ impl DiagnosticLogger {
                 info!("[VideoEngine +{:.0}ms] JS Console Error: {}", elapsed, text);
             }
             VideoEvent::MetricsFinalized { play_detected, first_play_time_ms, total_buffer_count, total_buffer_time_ms, .. } => {
-                info!("[VideoEngine +{:.0}ms] 最终指标: play={}, first_play={:.0f}ms, buffer_count={}, buffer_time={:.0f}ms",
+                info!("[VideoEngine +{:.0}ms] 最终指标: play={}, first_play={}ms, buffer_count={}, buffer_time={}ms",
                     elapsed, play_detected, first_play_time_ms, total_buffer_count, total_buffer_time_ms);
             }
         }

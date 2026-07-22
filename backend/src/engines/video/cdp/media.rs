@@ -1,5 +1,5 @@
 use chromiumoxide::cdp::browser_protocol::media::{
-    EventPlayerCreated, EventPlayerEventsAdded, EventPlayerPropertiesChanged,
+    EventPlayersCreated, EventPlayerEventsAdded, EventPlayerPropertiesChanged,
 };
 use tracing::{debug, info};
 
@@ -14,147 +14,131 @@ impl MediaCollector {
         Self { tx }
     }
 
-    pub fn handle_player_created(&self, event: EventPlayerCreated) {
-        let player_id = event.player_id;
+    pub fn handle_player_created(&self, event: EventPlayersCreated) {
         let _ = self.tx.send(VideoEvent::PlayerIdentified {
             platform: "unknown".into(),
-            player_type: format!("player_{}", player_id),
+            player_type: format!("player_{}", event.players.len()),
             meta: EventMeta::now(),
         });
     }
 
     pub fn handle_properties_changed(&self, event: EventPlayerPropertiesChanged) {
         for prop in event.properties.iter() {
+            let val = &prop.value;
+            let player_id_str = event.player_id.as_ref().to_string();
             match prop.name.as_str() {
                 "kResolution" => {
-                    if let Some(res) = &prop.value {
-                        let parts: Vec<&str> = res.split('x').collect();
-                        if parts.len() == 2 {
-                            if let (Ok(w), Ok(h)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                                let _ = self.tx.send(VideoEvent::ResolutionChanged {
-                                    width: w, height: h, meta: EventMeta::now(),
-                                });
-                            }
+                    let parts: Vec<&str> = val.split('x').collect();
+                    if parts.len() == 2 {
+                        if let (Ok(w), Ok(h)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                            let _ = self.tx.send(VideoEvent::ResolutionChanged {
+                                width: w, height: h, meta: EventMeta::now(),
+                            });
                         }
                     }
                 }
                 "kFps" => {
-                    if let Some(val) = &prop.value {
-                        if let Ok(fps) = val.parse::<f64>() {
-                            let _ = self.tx.send(VideoEvent::FpsChanged {
-                                fps, meta: EventMeta::now(),
-                            });
-                        }
-                    }
-                }
-                "kVideoBitrateKbps" => {
-                    if let Some(val) = &prop.value {
-                        if let Ok(vbr) = val.parse::<f64>() {
-                            let _ = self.tx.send(VideoEvent::BitrateChanged {
-                                video_kbps: vbr, audio_kbps: 0.0, meta: EventMeta::now(),
-                            });
-                        }
-                    }
-                }
-                "kAudioBitrateKbps" => {
-                    if let Some(val) = &prop.value {
-                        if let Ok(abr) = val.parse::<f64>() {
-                            let _ = self.tx.send(VideoEvent::BitrateChanged {
-                                video_kbps: 0.0, audio_kbps: abr, meta: EventMeta::now(),
-                            });
-                        }
-                    }
-                }
-                "kDroppedFrames" => {
-                    if let Some(val) = &prop.value {
-                        if let Ok(dropped) = val.parse::<u64>() {
-                            let _ = self.tx.send(VideoEvent::DroppedFramesChanged {
-                                dropped, decoded: 0, meta: EventMeta::now(),
-                            });
-                        }
-                    }
-                }
-                "kDecodedFrames" => {
-                    if let Some(val) = &prop.value {
-                        if let Ok(decoded) = val.parse::<u64>() {
-                            let _ = self.tx.send(VideoEvent::DroppedFramesChanged {
-                                dropped: 0, decoded, meta: EventMeta::now(),
-                            });
-                        }
-                    }
-                }
-                "kMimeType" => {
-                    if let Some(mime) = &prop.value {
-                        let (vc, ac) = parse_codecs(mime);
-                        let _ = self.tx.send(VideoEvent::CodecDetected {
-                            video_codec: vc,
-                            audio_codec: ac,
-                            mime_type: mime.clone(),
-                            meta: EventMeta::now(),
+                    if let Ok(fps) = val.parse::<f64>() {
+                        let _ = self.tx.send(VideoEvent::FpsChanged {
+                            fps, meta: EventMeta::now(),
                         });
                     }
                 }
+                "kVideoBitrateKbps" => {
+                    if let Ok(vbr) = val.parse::<f64>() {
+                        let _ = self.tx.send(VideoEvent::BitrateChanged {
+                            video_kbps: vbr, audio_kbps: 0.0, meta: EventMeta::now(),
+                        });
+                    }
+                }
+                "kAudioBitrateKbps" => {
+                    if let Ok(abr) = val.parse::<f64>() {
+                        let _ = self.tx.send(VideoEvent::BitrateChanged {
+                            video_kbps: 0.0, audio_kbps: abr, meta: EventMeta::now(),
+                        });
+                    }
+                }
+                "kDroppedFrames" => {
+                    if let Ok(dropped) = val.parse::<u64>() {
+                        let _ = self.tx.send(VideoEvent::DroppedFramesChanged {
+                            dropped, decoded: 0, meta: EventMeta::now(),
+                        });
+                    }
+                }
+                "kDecodedFrames" => {
+                    if let Ok(decoded) = val.parse::<u64>() {
+                        let _ = self.tx.send(VideoEvent::DroppedFramesChanged {
+                            dropped: 0, decoded, meta: EventMeta::now(),
+                        });
+                    }
+                }
+                "kMimeType" => {
+                    let (vc, ac) = parse_codecs(val);
+                    let _ = self.tx.send(VideoEvent::CodecDetected {
+                        video_codec: vc,
+                        audio_codec: ac,
+                        mime_type: val.clone(),
+                        meta: EventMeta::now(),
+                    });
+                }
                 _ => {
-                    debug!(
-                        "Media property: {} = {:?}",
-                        prop.name, prop.value
-                    );
+                    debug!("Media property: {} = {:?}", prop.name, prop.value);
                 }
             }
         }
     }
 
     pub fn handle_events_added(&self, event: EventPlayerEventsAdded) {
+        let player_id_str = event.player_id.as_ref().to_string();
         for ev in event.events.iter() {
-            match ev.event_type.as_str() {
-                "playing" => {
+            let event_type = ev.value.clone();
+            match event_type.as_str() {
+                "playing" | "play" => {
                     let _ = self.tx.send(VideoEvent::PlayStarted {
-                        player_id: Some(event.player_id.clone()),
+                        player_id: Some(player_id_str.clone()),
                         video_src: None,
                         meta: EventMeta::now(),
                     });
                 }
-                "buffering" | "buffer_start" => {
+                "buffering" | "buffer_start" | "waiting" => {
                     let _ = self.tx.send(VideoEvent::BufferStarted {
-                        player_id: Some(event.player_id.clone()),
+                        player_id: Some(player_id_str.clone()),
                         meta: EventMeta::now(),
                     });
                 }
-                "buffer_end" | "buffered" => {
+                "buffer_end" | "buffered" | "canplay" | "canplaythrough" => {
                     let _ = self.tx.send(VideoEvent::BufferEnded {
-                        player_id: Some(event.player_id.clone()),
+                        player_id: Some(player_id_str.clone()),
                         duration_ms: 0.0,
                         meta: EventMeta::now(),
                     });
                 }
                 "error" => {
-                    let error_msg = ev.value.clone().unwrap_or_default();
                     let _ = self.tx.send(VideoEvent::VideoError {
                         error_type: "media".into(),
-                        message: format!("player_id={}, value={}", event.player_id, error_msg),
+                        message: format!("player_id={}", player_id_str),
                         meta: EventMeta::now(),
                     });
                 }
                 "ended" => {
                     let _ = self.tx.send(VideoEvent::PlayEnded {
-                        player_id: Some(event.player_id.clone()),
+                        player_id: Some(player_id_str.clone()),
                         meta: EventMeta::now(),
                     });
                 }
-                "seek" => {
+                "seek" | "seeked" => {
                     let _ = self.tx.send(VideoEvent::Seek {
                         from_sec: 0.0, to_sec: 0.0, meta: EventMeta::now(),
                     });
                 }
                 "pause" => {
                     let _ = self.tx.send(VideoEvent::PlayPaused {
-                        player_id: Some(event.player_id.clone()),
+                        player_id: Some(player_id_str.clone()),
                         meta: EventMeta::now(),
                     });
                 }
-                "resume" | "playing" => {}
                 other => {
-                    info!("Media event: {} (player={})", other, event.player_id);
+                    info!("Media event: {} (player={})", other, player_id_str);
                 }
             }
         }
@@ -165,7 +149,6 @@ fn parse_codecs(mime: &str) -> (String, String) {
     let mut vc = String::new();
     let mut ac = String::new();
     let lower = mime.to_lowercase();
-    // 查找 codecs="..." 部分
     if let Some(start) = lower.find("codecs=") {
         let rest = &lower[start + 7..];
         let codec_str = rest.trim_matches('"');

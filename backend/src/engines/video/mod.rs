@@ -233,7 +233,7 @@ impl VideoEngine {
 
         let tx = event_tx.clone();
         if let Ok(mut stream) = page.event_listener::<
-            chromiumoxide::cdp::browser_protocol::media::EventPlayerCreated
+            chromiumoxide::cdp::browser_protocol::media::EventPlayersCreated
         >().await {
             tokio::spawn(async move {
                 let collector = cdp::media::MediaCollector::new(tx.clone());
@@ -305,7 +305,7 @@ impl VideoEngine {
 
         let tx = event_tx.clone();
         if let Ok(mut stream) = page.event_listener::<
-            chromiumoxide::cdp::browser_protocol::runtime::EventConsoleApiCalled
+            chromiumoxide::cdp::js_protocol::runtime::EventConsoleApiCalled
         >().await {
             tokio::spawn(async move {
                 let collector = cdp::runtime::RuntimeCollector::new(tx.clone());
