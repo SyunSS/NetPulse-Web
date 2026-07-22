@@ -27,6 +27,8 @@ pub struct TaskWorker {
     task_rx: mpsc::Receiver<TaskJob>,
     progress_tx: broadcast::Sender<ProgressMessage>,
     browser_provider: Arc<Box<dyn BrowserProvider>>,
+    cancel_rx: tokio::sync::broadcast::Receiver<String>,
+    cancelled_tasks: std::collections::HashSet<String>,
 }
 
 impl TaskWorker {
@@ -36,8 +38,9 @@ impl TaskWorker {
         task_rx: mpsc::Receiver<TaskJob>,
         progress_tx: broadcast::Sender<ProgressMessage>,
         browser_provider: Arc<Box<dyn BrowserProvider>>,
+        cancel_rx: tokio::sync::broadcast::Receiver<String>,
     ) -> Self {
-        Self { db, config, task_rx, progress_tx, browser_provider }
+        Self { db, config, task_rx, progress_tx, browser_provider, cancel_rx, cancelled_tasks: std::collections::HashSet::new() }
     }
 
     /// 启动 Worker，返回 JoinHandle
@@ -45,55 +48,72 @@ impl TaskWorker {
         tokio::spawn(async move {
             info!("TaskWorker 启动，等待任务...");
 
-            while let Some(job) = self.task_rx.recv().await {
-                info!("收到任务: {} (类型: {})", job.task_id, job.task_type);
+            loop {
+                tokio::select! {
+                    Some(job) = self.task_rx.recv() => {
+                        if self.cancelled_tasks.contains(&job.task_id) {
+                            warn!("任务 {} 已被取消，跳过", job.task_id);
+                            continue;
+                        }
+                        info!("收到任务: {} (类型: {})", job.task_id, job.task_type);
 
-                if job.task_type == "website" {
-                    let db = self.db.clone();
-                    let config = self.config.clone();
-                    let progress_tx = self.progress_tx.clone();
-                    let bp = self.browser_provider.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = run_website_task(db, config, progress_tx, bp, job).await {
-                            error!("任务执行异常: {}", e);
+                        if job.task_type == "website" {
+                            let db = self.db.clone();
+                            let config = self.config.clone();
+                            let progress_tx = self.progress_tx.clone();
+                            let bp = self.browser_provider.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = run_website_task(db, config, progress_tx, bp, job).await {
+                                    error!("任务执行异常: {}", e);
+                                }
+                            });
+                        } else if job.task_type == "video" {
+                            let db = self.db.clone();
+                            let config = self.config.clone();
+                            let progress_tx = self.progress_tx.clone();
+                            let bp = self.browser_provider.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = run_video_task(db, config, progress_tx, bp, job).await {
+                                    error!("视频任务执行异常: {}", e);
+                                }
+                            });
+                        } else if job.task_type == "download" {
+                            let db = self.db.clone();
+                            let config = self.config.clone();
+                            let progress_tx = self.progress_tx.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = run_download_task(db, config, progress_tx, job).await {
+                                    error!("下载任务执行异常: {}", e);
+                                }
+                            });
+                        } else if job.task_type == "ping" {
+                            let db = self.db.clone();
+                            let config = self.config.clone();
+                            let progress_tx = self.progress_tx.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = run_ping_task(db, config, progress_tx, job).await {
+                                    error!("Ping 任务执行异常: {}", e);
+                                }
+                            });
+                        } else {
+                            warn!("不支持的任务类型: {}", job.task_type);
                         }
-                    });
-                } else if job.task_type == "video" {
-                    let db = self.db.clone();
-                    let config = self.config.clone();
-                    let progress_tx = self.progress_tx.clone();
-                    let bp = self.browser_provider.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = run_video_task(db, config, progress_tx, bp, job).await {
-                            error!("视频任务执行异常: {}", e);
-                        }
-                    });
-                } else if job.task_type == "download" {
-                    let db = self.db.clone();
-                    let config = self.config.clone();
-                    let progress_tx = self.progress_tx.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = run_download_task(db, config, progress_tx, job).await {
-                            error!("下载任务执行异常: {}", e);
-                        }
-                    });
-                } else if job.task_type == "ping" {
-                    let db = self.db.clone();
-                    let config = self.config.clone();
-                    let progress_tx = self.progress_tx.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = run_ping_task(db, config, progress_tx, job).await {
-                            error!("Ping 任务执行异常: {}", e);
-                        }
-                    });
-                } else {
-                    warn!("不支持的任务类型: {}", job.task_type);
+                    }
+                    Ok(tid) = self.cancel_rx.recv() => {
+                        self.cancelled_tasks.insert(tid);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        info!("取消广播通道已关闭");
+                        break;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                 }
             }
 
             info!("TaskWorker 已停止");
         })
     }
+
 }
 
 /// 执行网站测试任务

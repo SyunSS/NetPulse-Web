@@ -73,7 +73,7 @@ impl TaskService {
         page: u32,
         size: u32,
     ) -> anyhow::Result<(Vec<TestTask>, u32)> {
-        let offset = (page - 1) * size;
+        let offset = (page.max(1) - 1) * size;
 
         let total: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM test_task WHERE user_id = ?")
             .bind(user_id)
@@ -149,13 +149,18 @@ impl TaskService {
     }
 
     /// 取消任务
-    pub async fn cancel_task(db: &SqlitePool, task_id: &str) -> anyhow::Result<()> {
+    pub async fn cancel_task(
+        db: &SqlitePool,
+        cancel_tx: &tokio::sync::broadcast::Sender<String>,
+        task_id: &str,
+    ) -> anyhow::Result<()> {
         let now = Utc::now().to_rfc3339();
         sqlx::query("UPDATE test_task SET status = 'cancelled', finished_at = ? WHERE id = ? AND status IN ('pending', 'running')")
             .bind(&now)
             .bind(task_id)
             .execute(db)
             .await?;
+        let _ = cancel_tx.send(task_id.to_string());
         Ok(())
     }
 

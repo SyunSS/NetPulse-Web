@@ -116,9 +116,9 @@ pub fn export_video_xlsx(
     let err_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0xFF0000));
 
     let headers = [
-        "序号", "URL", "平台", "方式", "DNS(ms)", "TCP(ms)", "HTTP响应(ms)",
-        "首帧显示(S)", "卡顿次数", "卡顿占比(%)", "播放时长(S)",
-        "分辨率", "丢帧", "��面标题", "错误",
+        "序号", "URL", "平台", "首帧时延(ms)", "缓冲次数", "缓冲总时长(ms)",
+        "播放成功", "下载速率(KB/s)", "视频大小(B)", "视频时长(ms)",
+        "丢帧数", "解码帧数", "页面标题", "截图路径", "错误",
     ];
 
     for (col, h) in headers.iter().enumerate() {
@@ -391,9 +391,9 @@ pub fn export_plan_run_xlsx(
     if !video_data.is_empty() {
         let sheet = workbook.add_worksheet().set_name("视频测试")?;
         let headers = [
-            "URL", "平台", "方式", "DNS(ms)", "TCP(ms)", "HTTP响应(ms)",
-            "首帧显示(S)", "卡顿次数", "卡顿占比(%)", "播放时长(S)",
-            "分辨率", "丢帧", "页面标题", "错误",
+            "URL", "平台", "DNS(ms)", "DNS成功率(%)", "TCP(ms)", "HTTP响应(ms)",
+            "首帧时延(ms)", "缓冲次数", "缓冲总时长(ms)", "缓冲率(%)", "下载速率(KB/s)",
+            "视频大小(B)", "视频时长(ms)", "丢帧数", "解码帧数", "页面标题", "错误",
         ];
         for (col, h) in headers.iter().enumerate() {
             sheet.write_with_format(0, col as u16, *h, &header_fmt)?;

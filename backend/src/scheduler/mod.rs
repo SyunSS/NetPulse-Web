@@ -1,8 +1,6 @@
-use std::str::FromStr;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use cron::Schedule;
 use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
@@ -70,17 +68,6 @@ impl PlanScheduler {
             if should_run {
                 if let Err(e) = self.run_plan(&plan, "cron").await {
                     error!("定时执行计划 {} 失败: {}", plan.name, e);
-                }
-            } else {
-                // 更新 next_run_at（防止漂移）
-                if let Some(cron_expr) = &plan.cron_expression {
-                    if let Some(new_next) = compute_next_run(cron_expr, &now.to_rfc3339()) {
-                        let _ = sqlx::query("UPDATE task_plans SET next_run_at = ? WHERE id = ?")
-                            .bind(&new_next)
-                            .bind(&plan.id)
-                            .execute(&self.db)
-                            .await;
-                    }
                 }
             }
         }
@@ -203,13 +190,5 @@ impl PlanScheduler {
 
 /// 计算 cron 下次执行时间
 pub fn compute_next_run(cron_expr: &str, from: &str) -> Option<String> {
-    let normalized = if cron_expr.split_whitespace().count() == 5 {
-        format!("0 {}", cron_expr)
-    } else {
-        cron_expr.to_string()
-    };
-    let schedule = Schedule::from_str(&normalized).ok()?;
-    let now: DateTime<Utc> = from.parse().ok()?;
-    let next = schedule.after(&now).next()?;
-    Some(next.to_rfc3339())
+    crate::services::plan_service::compute_next_run(cron_expr, from)
 }

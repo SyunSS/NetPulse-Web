@@ -153,17 +153,19 @@ impl VideoEngine {
             })()"#
         );
 
-        // 7. PlaybackController: 多级播放触发 + 轮询
+        // 7. PlaybackController: 多级播放触发
         let max_wait = if platform_cfg.is_detect_only() { 10 } else { 60 };
         let mut ctrl = playback::PlaybackController::new(max_wait);
 
         // 模拟点击的闭包
         let click_page = || {
-            // 点击页面中心触发播放
             let _ = page.evaluate_sync(
                 "document.elementFromPoint(window.innerWidth/2,window.innerHeight/2)?.click()"
             );
         };
+
+        // 执行多级播放触发 (Auto→Click→Keyboard)
+        let trigger = ctrl.run(click_page).await;
 
         // 8. 轮询监控: 1s间隔采集视频状态 (首帧/卡顿/分辨率)
         let mut monitor_data = serde_json::json!({});
@@ -173,18 +175,15 @@ impl VideoEngine {
         for _ in 0..max_polls {
             tokio::time::sleep(Duration::from_secs(1)).await;
             poll_count += 1;
-            // 轮询视频状态
             let poll_result: serde_json::Value = page.evaluate_sync(poll_js)
                 .ok().and_then(|v| v.as_str().and_then(|s| serde_json::from_str(s).ok()))
                 .unwrap_or(serde_json::json!({"alive":false}));
             let ended = poll_result.get("ended").and_then(|v| v.as_bool()).unwrap_or(false);
             if ended { break; }
             monitor_data = poll_result;
-            // 检查网络请求
             let net = cdp_handler.network.snapshot();
             if net.segment_count > 0 { ctrl.on_network_media(); }
         }
-        let trigger = ctrl.trigger_method();
         let diag = ctrl.diagnostics();
 
         // 8. JS 直接读取 video 元素实时状态（弥补 CDP 事件不稳定的问题）

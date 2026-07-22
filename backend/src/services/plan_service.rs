@@ -179,7 +179,7 @@ impl PlanService {
         page: u32,
         size: u32,
     ) -> anyhow::Result<(Vec<PlanWithItems>, u32)> {
-        let offset = (page - 1) * size;
+        let offset = (page.max(1) - 1) * size;
         let total: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM task_plans WHERE user_id = ?")
             .bind(user_id)
             .fetch_one(db)
@@ -520,12 +520,11 @@ impl PlanService {
 }
 
 /// 计算 cron 表达式的下次执行时间
-fn compute_next_run(cron_expr: &str, from: &str) -> Option<String> {
+pub fn compute_next_run(cron_expr: &str, from: &str) -> Option<String> {
     use chrono::DateTime;
     use cron::Schedule;
     use std::str::FromStr;
 
-    // cron crate v0.12 要求至少 6 字段（带秒），自动给 5 字段表达式补 "0 "
     let normalized = if cron_expr.split_whitespace().count() == 5 {
         format!("0 {}", cron_expr)
     } else {

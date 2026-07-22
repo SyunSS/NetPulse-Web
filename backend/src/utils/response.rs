@@ -130,6 +130,7 @@ pub struct AppState {
     pub config: AppConfig,
     pub task_tx: mpsc::Sender<TaskJob>,
     pub progress_tx: broadcast::Sender<ProgressMessage>,
+    pub cancel_tx: broadcast::Sender<String>,
 }
 
 /// 任务作业 — 通过 channel 发送给 Worker

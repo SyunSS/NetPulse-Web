@@ -42,7 +42,7 @@ impl PlaybackController {
     /// 运行完整的播放触发流程
     pub async fn run<F>(&mut self, do_click: F) -> TriggerMethod
     where
-        F: Fn() + Send + 'static,
+        F: Fn() + Send,
     {
         // Level 1: 等待自动播放 (0-12s)
         debug!("[PlaybackCtrl] Level 1: 等待自动播放");

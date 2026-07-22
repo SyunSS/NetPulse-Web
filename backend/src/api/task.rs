@@ -152,7 +152,7 @@ async fn cancel_task(
     Extension(_claims): Extension<Claims>,
     Path(task_id): Path<String>,
 ) -> Result<Json<crate::utils::response::ApiResponse<()>>, AppError> {
-    TaskService::cancel_task(&state.db, &task_id)
+    TaskService::cancel_task(&state.db, &state.cancel_tx, &task_id)
         .await
         .map_err(|e| AppError::internal(&e.to_string()))?;
     Ok(Json(ok_with_msg("任务已取消", ())))

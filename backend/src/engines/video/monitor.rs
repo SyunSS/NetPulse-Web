@@ -3,7 +3,7 @@ pub fn video_monitor_inject_js() -> &'static str {
     r#"(function(){
     window.__videoMonitor = { firstFrameTime: 0, stutterCount: 0, stutterDuration: 0,
         stutterStart: 0, lastCt: 0, playStartTime: 0, hist: [], vw: 0, vh: 0,
-        vdur: 0, ended: false, lastPollTime: Date.now(), firstPlayTimeMs: null };
+        vdur: 0, ended: false, lastPollTime: Date.now(), firstPlayTimeMs: null, monitorStart: Date.now() };
 })()"#
 }
 
@@ -16,7 +16,8 @@ pub fn video_poll_js() -> &'static str {
 
         // 首帧
         if (m.firstFrameTime === 0 && !v.paused && ct > 0) {
-            m.firstFrameTime = t; m.firstPlayTimeMs = t - m.lastPollTime + (m.firstPlayTimeMs||0);
+            m.firstFrameTime = t;
+            m.firstPlayTimeMs = (m.firstPlayTimeMs != null) ? m.firstPlayTimeMs : (t - (m.monitorStart || m.lastPollTime));
             m.vw = v.videoWidth; m.vh = v.videoHeight; m.vdur = v.duration;
             m.playStartTime = t; m.lastCt = ct;
         }
