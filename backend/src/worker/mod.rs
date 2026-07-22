@@ -9,7 +9,6 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::config::{match_platform, AppConfig};
-use crate::engines::browser::provider::BrowserProvider;
 use crate::engines::browser::BrowserEngine;
 use crate::engines::dns::DnsEngine;
 use crate::engines::download::DownloadEngine;
@@ -26,7 +25,6 @@ pub struct TaskWorker {
     config: Arc<AppConfig>,
     task_rx: mpsc::Receiver<TaskJob>,
     progress_tx: broadcast::Sender<ProgressMessage>,
-    browser_provider: Arc<Box<dyn BrowserProvider>>,
     cancel_rx: tokio::sync::broadcast::Receiver<String>,
     cancelled_tasks: std::collections::HashSet<String>,
 }
@@ -37,10 +35,9 @@ impl TaskWorker {
         config: Arc<AppConfig>,
         task_rx: mpsc::Receiver<TaskJob>,
         progress_tx: broadcast::Sender<ProgressMessage>,
-        browser_provider: Arc<Box<dyn BrowserProvider>>,
         cancel_rx: tokio::sync::broadcast::Receiver<String>,
     ) -> Self {
-        Self { db, config, task_rx, progress_tx, browser_provider, cancel_rx, cancelled_tasks: std::collections::HashSet::new() }
+        Self { db, config, task_rx, progress_tx, cancel_rx, cancelled_tasks: std::collections::HashSet::new() }
     }
 
     /// 启动 Worker，返回 JoinHandle
@@ -61,9 +58,8 @@ impl TaskWorker {
                             let db = self.db.clone();
                             let config = self.config.clone();
                             let progress_tx = self.progress_tx.clone();
-                            let bp = self.browser_provider.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = run_website_task(db, config, progress_tx, bp, job).await {
+                                if let Err(e) = run_website_task(db, config, progress_tx, job).await {
                                     error!("任务执行异常: {}", e);
                                 }
                             });
@@ -71,9 +67,8 @@ impl TaskWorker {
                             let db = self.db.clone();
                             let config = self.config.clone();
                             let progress_tx = self.progress_tx.clone();
-                            let bp = self.browser_provider.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = run_video_task(db, config, progress_tx, bp, job).await {
+                                if let Err(e) = run_video_task(db, config, progress_tx, job).await {
                                     error!("视频任务执行异常: {}", e);
                                 }
                             });
@@ -121,7 +116,6 @@ async fn run_website_task(
     db: SqlitePool,
     config: Arc<AppConfig>,
     progress_tx: broadcast::Sender<ProgressMessage>,
-    browser_provider: Arc<Box<dyn BrowserProvider>>,
     job: TaskJob,
 ) -> anyhow::Result<()> {
     let task_id = &job.task_id;
@@ -141,7 +135,7 @@ async fn run_website_task(
         let _ = progress_tx.send(ProgressMessage::UrlTesting { task_id: task_id.clone(), url: url.clone(), current: i + 1, total });
         log_progress(&db, &progress_tx, task_id, "info", &format!("正在测试: {}", url));
 
-        match test_website_url(&db, &config, &browser_provider, task_id, url, timeout, repeat_count).await {
+        match test_website_url(&db, &config, task_id, url, timeout, repeat_count).await {
             Ok(result) => {
                 success_count += 1;
                 let _ = progress_tx.send(ProgressMessage::UrlCompleted { task_id: task_id.clone(), url: url.clone(), result: result.clone() });
@@ -209,7 +203,6 @@ fn metric_enabled(metrics: &[String], category: &str) -> bool {
 async fn test_website_url(
     db: &SqlitePool,
     config: &AppConfig,
-    browser_provider: &Arc<Box<dyn BrowserProvider>>,
     task_id: &str,
     url: &str,
     timeout: Duration,
@@ -255,7 +248,8 @@ async fn test_website_url(
         if let Some(s) = http.http_status { http_statuses.push(s); }
         if final_url.is_none() { final_url = Some(http.final_url.clone()); }
 
-        let browser = BrowserEngine::new(browser_provider.clone(), &config.browser.path, config.browser.headless, timeout).test_page(url).await;
+        let browser_engine = BrowserEngine::new(config.browser.clone(), timeout);
+        let browser = browser_engine.test_page(url).await;
         if let Some(v) = browser.fp_ms { fp_times.push(v); }
         if let Some(v) = browser.fcp_ms { fcp_times.push(v); }
         if let Some(v) = browser.dom_content_loaded_ms { dcl_times.push(v); }
@@ -449,26 +443,22 @@ fn log_progress(
     level: &str,
     message: &str,
 ) {
-    // 写入数据库日志
     let level_str = level.to_string();
     let msg = message.to_string();
     let tid = task_id.to_string();
 
-    // 也推送 WebSocket 消息
     let _ = tx.send(ProgressMessage::Log {
         task_id: task_id.to_string(),
         level: level.to_string(),
         message: message.to_string(),
     });
 
-    // 记录到 tracing
     match level {
         "error" => error!("[{}] {}", tid, msg),
         "warn" => warn!("[{}] {}", tid, msg),
         _ => info!("[{}] {}", tid, msg),
     }
 
-    // 写 DB (后台 spawn 避免阻塞)
     let db = db.clone();
     let level_str = level_str.clone();
     let msg = msg.clone();
@@ -489,12 +479,10 @@ async fn run_video_task(
     db: SqlitePool,
     config: Arc<AppConfig>,
     progress_tx: broadcast::Sender<ProgressMessage>,
-    browser_provider: Arc<Box<dyn BrowserProvider>>,
     job: TaskJob,
 ) -> anyhow::Result<()> {
     let task_id = &job.task_id;
     let total = job.urls.len();
-    let timeout = Duration::from_secs(config.task.timeout_seconds);
 
     update_task_status(&db, task_id, "running", None).await?;
 
@@ -518,7 +506,7 @@ async fn run_video_task(
 
         log_progress(&db, &progress_tx, task_id, "info", &format!("视频测试: {}", url));
 
-        match test_single_video(&db, &config, &browser_provider, task_id, url, timeout).await {
+        match test_single_video(&db, &config, task_id, url).await {
             Ok(result) => {
                 success_count += 1;
                 let _ = progress_tx.send(ProgressMessage::UrlCompleted {
@@ -623,17 +611,15 @@ async fn run_video_task(
 async fn test_single_video(
     db: &SqlitePool,
     config: &AppConfig,
-    browser_provider: &Arc<Box<dyn BrowserProvider>>,
     task_id: &str,
     url: &str,
-    timeout: Duration,
 ) -> anyhow::Result<VideoResult> {
     let now = Utc::now().to_rfc3339();
     let result_id = Uuid::new_v4().to_string();
 
-    // 视频引擎测试 — 配置驱动平台匹配
     let platform_cfg = match_platform(&config.video_platforms, url);
-    let video_engine = VideoEngine::new(browser_provider.clone(), &config.browser.path, config.browser.headless, timeout);
+    let timeout = Duration::from_secs(config.task.timeout_seconds);
+    let video_engine = VideoEngine::new(&config.video_browser.path, config.video_browser.headless, timeout);
     let video_result = video_engine.test_page(url, &platform_cfg).await;
 
     // 保存截图

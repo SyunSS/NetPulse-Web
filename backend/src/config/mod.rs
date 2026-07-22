@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub storage: StorageConfig,
     pub jwt: JwtConfig,
     pub video_platforms: Vec<VideoPlatformConfig>,
+    pub video_browser: VideoBrowserConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -19,10 +20,6 @@ pub struct VideoPlatformConfig {
     pub name: String,
     #[serde(default)]
     pub url_keywords: Vec<String>,
-    #[serde(default)]
-    pub video_selector: Option<String>,
-    #[serde(default)]
-    pub wait_seconds: Option<u64>,
     #[serde(default)]
     pub detect_only: Option<bool>,
 }
@@ -49,18 +46,10 @@ pub fn match_platform(platforms: &[VideoPlatformConfig], url: &str) -> VideoPlat
         .iter()
         .find(|p| p.matches_url(url))
         .cloned()
-        .unwrap_or_else(|| {
-            platforms
-                .iter()
-                .find(|p| p.name == "html5")
-                .cloned()
-                .unwrap_or_else(|| VideoPlatformConfig {
-                    name: "html5".to_string(),
-                    url_keywords: vec![],
-                    video_selector: Some("video".to_string()),
-                    wait_seconds: Some(1),
-                    detect_only: None,
-                })
+        .unwrap_or_else(|| VideoPlatformConfig {
+            name: "html5".to_string(),
+            url_keywords: vec![],
+            detect_only: None,
         })
 }
 
@@ -91,6 +80,12 @@ fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BrowserConfig {
+    pub path: String,
+    pub headless: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VideoBrowserConfig {
     pub path: String,
     pub headless: bool,
 }

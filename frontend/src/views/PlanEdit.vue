@@ -252,7 +252,6 @@ async function loadPlan() {
       urls: typeof it.urls === 'string' ? JSON.parse(it.urls) : it.urls,
       options: it.options ? (typeof it.options === 'string' ? JSON.parse(it.options) : it.options) : {},
       repeat_count: it.repeat_count || 1,
-      engine: it.engine || 'headless_chrome',
     }))
   } catch (e: any) {
     message.error(e.message || '加载失败')
@@ -289,7 +288,6 @@ async function handleSave() {
         urls: it.urls.filter(u => u.trim()),
         options: it.options || {},
         repeat_count: it.repeat_count || 1,
-        engine: it.engine || 'headless_chrome',
       })),
     }
 
@@ -445,10 +443,6 @@ onMounted(() => {
                 :value="(item.options as any)?.ping_count ?? 10"
                 @input="(e: any) => { const v = parseInt(e.target.value)||10; (item.options as any).ping_count = v }"
                 type="number" min="1" max="100" class="repeat-input" />
-              <select v-model="item.engine" class="engine-select" v-if="item.task_type === 'website' || item.task_type === 'video'">
-                <option value="headless_chrome">headless_chrome</option>
-                <option value="chromiumoxide">chromiumoxide (预留)</option>
-              </select>
               <button class="remove-btn" @click="removeItem(idx)">🗑</button>
             </div>
             <div class="urls-section">

@@ -18,6 +18,10 @@ file = true
 path = "/usr/bin/chromium"
 headless = true
 
+[video_browser]
+path = "/usr/bin/chromium"
+headless = true
+
 [task]
 concurrency = 5
 timeout_seconds = 120
@@ -34,22 +38,12 @@ expiration_hours = 24
 [[video_platforms]]
 name = "youtube"
 url_keywords = ["youtube.com", "youtu.be"]
-video_selector = "video.html5-main-video"
-wait_seconds = 3
 
 [[video_platforms]]
 name = "bilibili"
 url_keywords = ["bilibili.com", "b23.tv"]
-video_selector = "video.bpx-player-video"
-wait_seconds = 5
 
 [[video_platforms]]
 name = "netflix"
 url_keywords = ["netflix.com"]
 detect_only = true
-
-[[video_platforms]]
-name = "html5"
-url_keywords = []
-video_selector = "video"
-wait_seconds = 1

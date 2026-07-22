@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
-use crate::engines::browser::provider::{BrowserPage, BrowserProvider};
+use crate::config::BrowserConfig;
 
 /// 浏览器测试结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,7 +24,6 @@ pub struct BrowserResult {
     pub page_title: Option<String>,
     pub screenshot: Option<Vec<u8>>,
     pub error: Option<String>,
-    // 新增 CDP 采集字段
     pub html_size: Option<i32>,
     pub css_size: Option<i32>,
     pub js_size: Option<i32>,
@@ -44,27 +43,15 @@ pub struct BrowserResult {
     pub first_screen_ratio: Option<f64>,
 }
 
-/// 浏览器引擎 — 通过 BrowserProvider trait 驱动浏览器
+/// 浏览器引擎 — 直接使用 headless_chrome
 pub struct BrowserEngine {
-    provider: Arc<Box<dyn BrowserProvider>>,
-    chrome_path: String,
-    headless: bool,
+    chrome_config: BrowserConfig,
     timeout: Duration,
 }
 
 impl BrowserEngine {
-    pub fn new(
-        provider: Arc<Box<dyn BrowserProvider>>,
-        chrome_path: &str,
-        headless: bool,
-        timeout: Duration,
-    ) -> Self {
-        Self {
-            provider,
-            chrome_path: chrome_path.to_string(),
-            headless,
-            timeout,
-        }
+    pub fn new(chrome_config: BrowserConfig, timeout: Duration) -> Self {
+        Self { chrome_config, timeout }
     }
 
     /// 测试页面，采集 Performance 指标和截图
@@ -72,62 +59,51 @@ impl BrowserEngine {
         info!("浏览器测试开始: {}", url);
         let total_start = std::time::Instant::now();
 
-        // 启动浏览器
-        let handle = match self.provider.launch(self.chrome_path.clone(), self.headless, vec![]).await {
-            Ok(h) => h,
+        let browser = match provider::launch_browser(&self.chrome_config) {
+            Ok(b) => b,
             Err(e) => { error!("浏览器启动失败: {}", e); return err_result(&e.to_string()); }
         };
-        let page = match handle.new_page().await {
+        let page = match provider::new_page(&browser) {
             Ok(p) => p,
             Err(e) => { error!("创建页面失败: {}", e); return err_result(&e.to_string()); }
         };
 
-        // 启用 CDP 域
         let _ = page.send_cdp("Network.enable", serde_json::json!({}));
 
-        // 页面采集器
-        let page_collector = std::sync::Arc::new(collectors::PageCollector::new());
+        let page_collector = Arc::new(collectors::PageCollector::new());
 
-        // 导航
         page_collector.record_navigation();
-        if let Err(e) = page.navigate_to(url).await {
+        if let Err(e) = page.navigate_to(url) {
             error!("导航失败: {}", e); return err_result(&e.to_string());
         }
-        if let Err(e) = page.wait_for_load().await {
+        if let Err(e) = page.wait_for_load() {
             debug!("等待导航完成: {}", e);
         }
 
-        // 注入 LCP Observer (在目标页面加载后注入, buffered:true 捕获已发生事件)
         let lcp_js = collectors::NetworkCollector::lcp_inject_js();
         let _ = page.evaluate_sync(lcp_js);
 
         let nav_elapsed = total_start.elapsed().as_secs_f64() * 1000.0;
 
-        // 等待渲染 + 资源加载 + LCP 采集
         tokio::time::sleep(Duration::from_secs(5)).await;
 
-        // 记录 Load 时间
         page_collector.record_load();
 
-        // 完整性能采集 JS (Navigation Timing + Paint + Resource + LCP + 衍生指标)
         let perf_js = collectors::NetworkCollector::collect_js();
         let perf_data: serde_json::Value = page.evaluate_sync(perf_js)
             .ok().and_then(|v| v.as_str().and_then(|s| serde_json::from_str(s).ok()))
             .unwrap_or(serde_json::Value::Null);
         let net_metrics = collectors::NetworkCollector::parse(perf_data.clone());
 
-        // 页面标题 + 最终 URL
         let title = page.evaluate_sync("document.title").ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()));
         let final_url = page.evaluate_sync("window.location.href").ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()));
 
-        // 截图
         let screenshot = page.screenshot().ok();
 
         let pg = page_collector.snapshot();
 
-        // 提取导航时机指标（从 navigation timing JS, 比外部独立探测更准）
         let nav_dns = net_metrics.dns_ms.or_else(|| {
             perf_data.get("dns").and_then(|v| v.as_f64()).filter(|&x| x > 0.0)
         });
@@ -161,7 +137,6 @@ impl BrowserEngine {
             lcp_ms: nav_lcp,
             cls: None,
             tti_ms: None,
-            // 新增: 从 navigation timing 获取的 DNS/Connect/TTFB
             nav_dns_ms: nav_dns, nav_connect_ms: nav_connect, nav_ttfb_ms: nav_ttfb,
             site_size_kb: Some(net_metrics.site_size_kb),
             avg_speed_kbps: Some(net_metrics.avg_speed_kbps),

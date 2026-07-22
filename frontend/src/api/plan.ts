@@ -20,7 +20,6 @@ export interface TaskPlanItem {
   urls: string
   options: string | null
   repeat_count: number
-  engine: string | null
   order_index: number
   created_at: string
 }
