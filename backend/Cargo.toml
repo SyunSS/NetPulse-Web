@@ -57,7 +57,7 @@ hickory-resolver = "0.24"
 # 浏览器 CDP（网页测试）
 headless_chrome = "1.0"
 # 浏览器 CDP（视频测试）
-chromiumoxide = { version = "0.6", features = ["tokio-runtime"] }
+chromiumoxide = { version = "0.9" }
 
 # 异步 trait
 async-trait = "0.1"

@@ -1,5 +1,5 @@
 use chromiumoxide::cdp::browser_protocol::media::{
-    EventPlayersCreated, EventPlayerEventsAdded, EventPlayerPropertiesChanged,
+    EventPlayerCreated, EventPlayerEventsAdded, EventPlayerPropertiesChanged,
 };
 use tracing::{debug, info};
 
@@ -14,10 +14,10 @@ impl MediaCollector {
         Self { tx }
     }
 
-    pub fn handle_player_created(&self, event: EventPlayersCreated) {
+    pub fn handle_player_created(&self, event: EventPlayerCreated) {
         let _ = self.tx.send(VideoEvent::PlayerIdentified {
             platform: "unknown".into(),
-            player_type: format!("player_{}", event.players.len()),
+            player_type: format!("player_{:?}", event.player.player_id),
             meta: EventMeta::now(),
         });
     }
