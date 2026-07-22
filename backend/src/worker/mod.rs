@@ -99,14 +99,14 @@ impl TaskWorker {
                             warn!("不支持的任务类型: {}", job.task_type);
                         }
                     }
-                    Ok(tid) = self.cancel_rx.recv() => {
-                        self.cancelled_tasks.insert(tid);
+                    result = self.cancel_rx.recv() => match result {
+                        Ok(tid) => { self.cancelled_tasks.insert(tid); }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            info!("取消广播通道已关闭");
+                            break;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        info!("取消广播通道已关闭");
-                        break;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                 }
             }
 

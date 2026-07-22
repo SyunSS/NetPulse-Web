@@ -70,9 +70,9 @@ router.beforeEach((to, _from, next) => {
   const authStore = useAuthStore()
 
   if (to.meta.requiresAuth && !authStore.isLoggedIn) {
-    next('/login')
+    next({ path: '/login', replace: true })
   } else if (to.meta.guest && authStore.isLoggedIn) {
-    next('/')
+    next({ path: '/', replace: true })
   } else {
     next()
   }

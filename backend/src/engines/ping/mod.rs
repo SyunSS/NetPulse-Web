@@ -221,14 +221,13 @@ fn extract_host(input: &str) -> String {
     let input = input.trim();
     let after_protocol = input.split("://").nth(1).unwrap_or(input);
     let after_path = after_protocol.split('/').next().unwrap_or(after_protocol);
-    let after_port = after_path.split(':').next().unwrap_or(after_path);
-    let host = after_port.to_string();
-    // 处理 IPv6: 去掉方括号
-    if host.starts_with('[') && host.ends_with(']') {
-        host[1..host.len()-1].to_string()
-    } else {
-        host
+    // 处理 IPv6: 优先从方括号中提取
+    if let Some(rest) = after_path.strip_prefix('[') {
+        if let Some((host, _)) = rest.split_once(']') {
+            return host.to_string();
+        }
     }
+    after_path.split(':').next().unwrap_or(after_path).to_string()
 }
 
 #[cfg(test)]
