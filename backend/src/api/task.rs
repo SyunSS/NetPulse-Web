@@ -41,7 +41,7 @@ async fn create_task(
         return Err(AppError::bad_request("测试URL列表不能为空"));
     }
     for url in &req.urls {
-        crate::utils::url::validate_url(url).map_err(AppError::bad_request)?;
+        crate::utils::url::validate_url(url).map_err(|s| AppError::bad_request(&s))?;
     }
 
     let valid_types = ["website", "download", "video"];

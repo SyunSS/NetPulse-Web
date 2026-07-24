@@ -229,11 +229,12 @@ const stClass = (s: string) => `st st-${s}`
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
-            <th>URL</th><th>文件DNS时延(ms)</th><th>文件DNS解析成功率(%)</th><th>文件TCP连接时延(ms)</th><th>文件下载速率(Mbps)</th><th>文件下载成功率(%)</th>
+            <th>URL</th><th>文件大小(MB)</th><th>文件DNS时延(ms)</th><th>文件DNS解析成功率(%)</th><th>文件TCP连接时延(ms)</th><th>文件下载速率(Mbps)</th><th>文件下载成功率(%)</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in downloadResults" :key="r.id">
               <td class="url-cell">{{ r.url }}</td>
+              <td>{{ r.file_size ? (r.file_size / 1048576).toFixed(2) : '-' }}</td>
               <td>{{ r.dns_time_ms?.toFixed(1) ?? '-' }}</td>
               <td>{{ (r.dns_success ?? null) !== null ? r.dns_success + '%' : '-' }}</td>
               <td>{{ r.tcp_time_ms?.toFixed(1) ?? '-' }}</td>

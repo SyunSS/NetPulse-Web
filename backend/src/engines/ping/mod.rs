@@ -33,7 +33,7 @@ impl PingEngine {
         let target = extract_host(host);
         if !validate_hostname(&target) {
             return PingTestResult {
-                host: target,
+                host: target.clone(),
                 avg_latency_ms: 0.0,
                 packet_loss_rate: 100.0,
                 jitter_ms: 0.0,
