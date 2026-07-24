@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
-      - RUST_LOG=info,netpulse_web=debug
+      - RUST_LOG=info,netpulse_web=debug,chromiumoxide=off
       - CHROME_PATH=/usr/bin/chromium
       # 容器内强制使用绝对路径
       - NETPULSE__DATABASE__PATH=/app/data/netpulse.db

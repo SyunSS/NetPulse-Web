@@ -115,7 +115,7 @@ fn init_logging(log_cfg: &crate::config::LoggingConfig) {
 
     let mut filter: EnvFilter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(&log_cfg.level));
-    filter = filter.add_directive("tungstenite=warn".parse().unwrap()).add_directive("chromiumoxide=error".parse().unwrap());
+    filter = filter.add_directive("tungstenite=warn".parse().unwrap()).add_directive("chromiumoxide=off".parse().unwrap());
 
     let is_json = log_cfg.format.as_str() == "json";
 
