@@ -1,17 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
+import { useDialog, useMessage } from 'naive-ui'
 import { usePlanStore } from '@/stores/plan'
-import { useAuthStore } from '@/stores/auth'
 import { getWsClient, type ProgressMessage } from '@/api/ws'
+import http from '@/api/index'
 import { formatTime } from '@/utils'
 
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const planStore = usePlanStore()
-const authStore = useAuthStore()
 
 const planId = route.params.id as string
 const ws = getWsClient()
@@ -35,11 +34,8 @@ async function fetchTaskMeta(ids: string[]) {
   for (const tid of ids) {
     if (taskMeta.value[tid]) continue
     try {
-      const r = await fetch(`/api/task/${tid}`, { headers: { Authorization: `Bearer ${authStore.token}` } })
-      if (r.ok) {
-        const data = (await r.json()).data
-        taskMeta.value[tid] = { id: tid, type: data.task_type, status: data.status }
-      }
+      const data = await http.get(`/task/${tid}`)
+      taskMeta.value[tid] = { id: tid, type: data.task_type, status: data.status }
     } catch {}
   }
 }
@@ -65,7 +61,7 @@ async function fetchRuns() {
       const ids = parseTaskIds(run.task_ids)
       if (ids.length) await fetchTaskMeta(ids)
     }
-  } catch (e) { console.error('fetchRuns:', e) }
+  } catch (e) { if (import.meta.env.DEV) console.error('fetchRuns:', e) }
 }
 
 const filteredRuns = () => {
@@ -85,38 +81,54 @@ function resetSearch() {
 
 async function handleDelete(runId: string, force = false) {
   const msg = force
-    ? '强制停止并删除此次运行的所有子任务？⚠ 所有关联任务及结果将被永久删除。'
+    ? '强制停止并删除此次运行的所有子任务？所有关联任务及结果将被永久删除。'
     : '确认删除这条运行记录？'
-  if (!confirm(msg)) return
-  try {
-    await planStore.deleteRun(planId, runId, force)
-    message.success('已删除')
-    fetchRuns()
-  } catch (e: any) {
-    message.error(e.message || '删除失败')
-  }
+  const dialog = useDialog()
+  dialog.warning({
+    title: force ? '强制删除' : '删除记录',
+    content: msg,
+    positiveText: '确认',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await planStore.deleteRun(planId, runId, force)
+        message.success('已删除')
+        fetchRuns()
+      } catch (e: any) {
+        message.error(e.message || '删除失败')
+      }
+    },
+  })
 }
 
 async function handleBatchDelete() {
   const ids = filteredRuns().filter(r => r.status !== 'running').map(r => r.id)
   if (ids.length === 0) { message.warning('没有可删除的记录'); return }
-  if (!confirm(`确认删除 ${ids.length} 条运行记录？`)) return
-  try {
-    await Promise.all(ids.map(id => planStore.deleteRun(planId, id)))
-    message.success(`已删除 ${ids.length} 条`)
-    fetchRuns()
-  } catch (e: any) {
-    message.error(e.message || '批量删除失败')
-  }
+  const dialog = useDialog()
+  dialog.warning({
+    title: '批量删除',
+    content: `确认删除 ${ids.length} 条运行记录？`,
+    positiveText: '确认删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await Promise.all(ids.map(id => planStore.deleteRun(planId, id)))
+        message.success(`已删除 ${ids.length} 条`)
+        fetchRuns()
+      } catch (e: any) {
+        message.error(e.message || '批量删除失败')
+      }
+    },
+  })
 }
 
 async function exportRun(runId: string, format: 'xlsx' | 'csv' | 'json') {
   try {
-    const resp = await fetch(`/api/plan/${planId}/run/${runId}/export?format=${format}`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
+    const resp = await http.get(`/plan/${planId}/run/${runId}/export`, {
+      params: { format },
+      responseType: 'blob',
     })
-    if (!resp.ok) throw new Error('导出失败')
-    const blob = await resp.blob()
+    const blob = resp instanceof Blob ? resp : await resp.data
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
     a.download = `plan_run_${runId.substring(0, 8)}.${format === 'xlsx' ? 'xlsx' : format === 'csv' ? 'csv' : 'json'}`

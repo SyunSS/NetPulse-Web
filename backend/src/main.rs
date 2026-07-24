@@ -14,13 +14,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use tokio::sync::{broadcast, mpsc};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{Any, AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::info;
 
 use crate::config::AppConfig;
 use crate::database::init_db;
 use crate::scheduler::PlanScheduler;
+use crate::utils::ratelimit::RateLimiter;
 use crate::utils::response::AppState;
 use crate::worker::TaskWorker;
 
@@ -31,8 +32,15 @@ async fn main() -> anyhow::Result<()> {
     let config_file = config_dir.join("config.toml");
     if !config_file.exists() {
         std::fs::create_dir_all(config_dir)?;
-        std::fs::write(&config_file, include_str!("../config.toml"))?;
-        println!("默认配置文件已创建: {}", config_file.display());
+        let default_config = include_str!("../config.toml");
+        // 用随机生成的密钥替换默认 JWT secret
+        let random_secret = uuid::Uuid::new_v4().to_string();
+        let config_content = default_config.replace(
+            "secret = \"netpulse-jwt-secret-change-in-production\"",
+            &format!("secret = \"{}\"", random_secret),
+        );
+        std::fs::write(&config_file, config_content)?;
+        println!("默认配置文件已创建: {}（JWT 密钥已随机生成）", config_file.display());
     }
 
     let config = AppConfig::load()?;
@@ -69,16 +77,19 @@ async fn main() -> anyhow::Result<()> {
     scheduler.start();
     info!("PlanScheduler 已启动");
 
+    let rate_limiter = std::sync::Arc::new(RateLimiter::new(10, 60)); // 每分钟10次
+
     let state = AppState {
         db: db_pool,
         config: config.clone(),
         task_tx,
         progress_tx,
         cancel_tx,
+        rate_limiter,
     };
 
     let app = api::build_router(state)
-        .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any));
+        .layer(CorsLayer::new().allow_origin(AllowOrigin::mirror_request()).allow_methods(Any).allow_headers(Any));
 
     let app = if std::path::Path::new("frontend-dist").exists() {
         info!("前端静态文件模式已启用 (frontend-dist/)");

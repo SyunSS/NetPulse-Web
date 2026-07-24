@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { useDialog, useMessage } from 'naive-ui'
 import { taskApi, type TestTask } from '@/api/task'
 import http from '@/api/index'
 import { formatTime } from '@/utils'
 
 const router = useRouter()
+const dialog = useDialog()
+const message = useMessage()
 
 const tasks = ref<TestTask[]>([])
 const total = ref(0)
@@ -37,7 +40,7 @@ async function fetchTasks() {
     const res = await taskApi.list(page.value, size.value)
     tasks.value = res.data.tasks
     total.value = res.data.total
-  } catch (e: any) { console.error(e) }
+    } catch (e: any) { if (import.meta.env.DEV) console.error(e) }
   finally { loading.value = false }
 }
 
@@ -63,28 +66,42 @@ function filteredTasks() {
 
 async function handleDelete(taskId: string, force?: boolean) {
   const msg = force ? '强制删除此任务（包括运行中）？' : '确认删除此任务？'
-  if (!confirm(msg)) return
-  try {
-    const url = force ? `/task/${taskId}?force=true` : `/task/${taskId}`
-    await http.delete(url)
-    fetchTasks()
-  } catch (e: any) { alert(e.message || '删除失败') }
+  dialog.warning({
+    title: '删除任务',
+    content: msg,
+    positiveText: '确认删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        const url = force ? `/task/${taskId}?force=true` : `/task/${taskId}`
+        await http.delete(url)
+        fetchTasks()
+      } catch (e: any) { message.error(e.message || '删除失败') }
+    },
+  })
 }
 
 async function handleCancel(taskId: string) {
   try { await taskApi.cancel(taskId); fetchTasks() }
-  catch (e: any) { alert(e.message || '取消失败') }
+  catch (e: any) { message.error(e.message || '取消失败') }
 }
 
 async function handleBatchDelete() {
   const ids = Array.from(selectedIds.value)
-  if (ids.length === 0) { alert('请先选择要删除的任务'); return }
-  if (!confirm(`确认删除选中的 ${ids.length} 个任务？运行中的不会被删除。`)) return
-  try {
-    await http.post('/task/batch-delete', { task_ids: ids })
-    selectedIds.value = new Set()
-    fetchTasks()
-  } catch (e: any) { alert(e.message || '删除失败') }
+  if (ids.length === 0) { message.warning('请先选择要删除的任务'); return }
+  dialog.warning({
+    title: '批量删除',
+    content: `确认删除选中的 ${ids.length} 个任务？运行中的不会被删除。`,
+    positiveText: '确认删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await http.post('/task/batch-delete', { task_ids: ids })
+        selectedIds.value = new Set()
+        fetchTasks()
+      } catch (e: any) { message.error(e.message || '删除失败') }
+    },
+  })
 }
 
 onMounted(() => { fetchTasks() })

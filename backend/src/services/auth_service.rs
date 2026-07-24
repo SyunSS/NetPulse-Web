@@ -31,8 +31,17 @@ impl AuthService {
         if req.username.trim().is_empty() {
             anyhow::bail!("用户名不能为空");
         }
-        if req.password.len() < 6 {
-            anyhow::bail!("密码至少需要6个字符");
+        if req.password.len() < 8 {
+            anyhow::bail!("密码至少需要8个字符");
+        }
+        if !req.password.chars().any(|c| c.is_uppercase()) {
+            anyhow::bail!("密码需要包含至少一个大写字母");
+        }
+        if !req.password.chars().any(|c| c.is_lowercase()) {
+            anyhow::bail!("密码需要包含至少一个小写字母");
+        }
+        if !req.password.chars().any(|c| c.is_ascii_digit()) {
+            anyhow::bail!("密码需要包含至少一个数字");
         }
 
         // 检查用户名是否已存在

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
+import { useDialog, useMessage } from 'naive-ui'
 import { usePlanStore } from '@/stores/plan'
 import { formatTime } from '@/utils'
 
@@ -50,14 +50,22 @@ async function handleRun(planId: string, planName: string) {
 }
 
 async function handleDelete(planId: string, planName: string) {
-  if (!confirm(`确认删除计划「${planName}」？此操作不可恢复。`)) return
-  try {
-    await planStore.deletePlan(planId)
-    message.success('已删除')
-    await planStore.fetchPlans(1, 20)
-  } catch (e: any) {
-    message.error(e.message || '删除失败')
-  }
+  const dialog = useDialog()
+  dialog.warning({
+    title: '删除计划',
+    content: `确认删除计划「${planName}」？此操作不可恢复。`,
+    positiveText: '确认删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await planStore.deletePlan(planId)
+        message.success('已删除')
+        await planStore.fetchPlans(1, 20)
+      } catch (e: any) {
+        message.error(e.message || '删除失败')
+      }
+    },
+  })
 }
 
 const filteredPlans = () => {

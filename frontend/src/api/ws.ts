@@ -1,6 +1,8 @@
 /**
  * WebSocket 客户端 — 接收实时测试进度
  */
+import { useAuthStore } from '@/stores/auth'
+
 export type ProgressMessage =
   | { type: 'task_started'; task_id: string; total_urls: number }
   | { type: 'url_testing'; task_id: string; url: string; current: number; total: number }
@@ -23,14 +25,15 @@ export class WsClient {
     this.taskId = taskId || null
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
+    const token = useAuthStore().token
     const url = taskId
-      ? `${protocol}//${host}/api/ws/?task_id=${taskId}`
-      : `${protocol}//${host}/api/ws/`
+      ? `${protocol}//${host}/api/ws/?task_id=${taskId}&token=${encodeURIComponent(token)}`
+      : `${protocol}//${host}/api/ws/?token=${encodeURIComponent(token)}`
 
     this.ws = new WebSocket(url)
 
     this.ws.onopen = () => {
-      console.log('[WS] 连接已建立')
+      if (import.meta.env.DEV) console.log('[WS] 连接已建立')
     }
 
     this.ws.onmessage = (event) => {
@@ -38,12 +41,12 @@ export class WsClient {
         const msg = JSON.parse(event.data) as ProgressMessage
         this.handlers.forEach((h) => h(msg))
       } catch (e) {
-        console.error('[WS] 消息解析失败:', e)
+        if (import.meta.env.DEV) console.error('[WS] 消息解析失败:', e)
       }
     }
 
     this.ws.onclose = () => {
-      console.log('[WS] 连接已关闭')
+      if (import.meta.env.DEV) console.log('[WS] 连接已关闭')
       // 自动重连（3秒后）
       this.reconnectTimer = window.setTimeout(() => {
         if (this.taskId) {
@@ -53,7 +56,7 @@ export class WsClient {
     }
 
     this.ws.onerror = (e) => {
-      console.error('[WS] 错误:', e)
+      if (import.meta.env.DEV) console.error('[WS] 错误:', e)
     }
   }
 

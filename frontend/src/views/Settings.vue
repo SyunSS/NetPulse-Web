@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
+import { useDialog, useMessage } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
 import { useDark } from '@/utils/theme'
 
@@ -44,14 +44,22 @@ async function updateRole(userId: string, role: string) {
 }
 
 async function deleteUser(userId: string, username: string) {
-  if (!confirm(`确认删除用户「${username}」？此操作不可撤销。`)) return
-  try {
-    await http.delete(`/admin/users/${userId}`)
-    message.success(`用户「${username}」已删除`)
-    fetchUsers()
-  } catch (e: any) {
-    message.error(e.message || '删除失败')
-  }
+  const dialog = useDialog()
+  dialog.warning({
+    title: '删除用户',
+    content: `确认删除用户「${username}」？此操作不可撤销。`,
+    positiveText: '确认删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await http.delete(`/admin/users/${userId}`)
+        message.success(`用户「${username}」已删除`)
+        fetchUsers()
+      } catch (e: any) {
+        message.error(e.message || '删除失败')
+      }
+    },
+  })
 }
 
 onMounted(() => {

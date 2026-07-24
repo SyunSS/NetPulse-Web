@@ -1,8 +1,10 @@
+use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -16,6 +18,7 @@ pub struct PlanScheduler {
     db: SqlitePool,
     task_tx: mpsc::Sender<TaskJob>,
     progress_tx: broadcast::Sender<ProgressMessage>,
+    running_plans: Arc<Mutex<HashSet<String>>>,
 }
 
 impl PlanScheduler {
@@ -24,11 +27,12 @@ impl PlanScheduler {
         task_tx: mpsc::Sender<TaskJob>,
         progress_tx: broadcast::Sender<ProgressMessage>,
     ) -> Self {
-        Self { db, task_tx, progress_tx }
+        Self { db, task_tx, progress_tx, running_plans: Arc::new(Mutex::new(HashSet::new())) }
     }
 
     /// 启动调度器后台任务
     pub fn start(self) -> JoinHandle<()> {
+        let running_plans = self.running_plans.clone();
         tokio::spawn(async move {
             info!("PlanScheduler 启动，每 60 秒检查一次");
             let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -55,6 +59,14 @@ impl PlanScheduler {
         let now = Utc::now();
 
         for plan in plans {
+            // 跳过已在运行的计划
+            {
+                let running = self.running_plans.lock().await;
+                if running.contains(&plan.id) {
+                    continue;
+                }
+            }
+
             let next_run_at = match &plan.next_run_at {
                 Some(s) => s.parse::<DateTime<Utc>>().ok(),
                 None => None,
@@ -66,9 +78,12 @@ impl PlanScheduler {
             };
 
             if should_run {
+                // 标记为运行中
+                self.running_plans.lock().await.insert(plan.id.clone());
                 if let Err(e) = self.run_plan(&plan, "cron").await {
                     error!("定时执行计划 {} 失败: {}", plan.name, e);
                 }
+                self.running_plans.lock().await.remove(&plan.id);
             }
         }
 

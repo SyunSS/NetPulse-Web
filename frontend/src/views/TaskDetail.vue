@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
+import { useDialog, useMessage } from 'naive-ui'
 import { taskApi, type TestTask, type WebsiteResult, type VideoResult, type DownloadResult, type PingResult } from '@/api/task'
 import { getWsClient, type ProgressMessage } from '@/api/ws'
 import { useAuthStore } from '@/stores/auth'
@@ -71,22 +71,30 @@ function handleWsMessage(msg: ProgressMessage) {
     fetchLogs()
 
 async function handleDelete(force?: boolean) {
-  const msg = force ? '强制删除此任务及所有结果？' : '确认删除此任务？'
-  if (!confirm(msg)) return
-  try {
-    const url = force ? `/task/${taskId}?force=true` : `/task/${taskId}`
-    await http.delete(url)
-    router.push('/')
-  } catch (e: any) { message.error(e.message || '删除失败') }
+  const msg = force ? '强制删除此任务及所有结果？此操作不可恢复。' : '确认删除此任务？'
+  const dialog = useDialog()
+  dialog.warning({
+    title: '删除任务',
+    content: msg,
+    positiveText: '确认删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        const url = force ? `/task/${taskId}?force=true` : `/task/${taskId}`
+        await http.delete(url)
+        router.push('/')
+      } catch (e: any) { message.error(e.message || '删除失败') }
+    },
+  })
 }
 
 async function handleExport(format: string) {
   try {
-    const resp = await fetch(`/api/task/${taskId}/export?format=${format}`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
+    const resp = await http.get(`/task/${taskId}/export`, {
+      params: { format },
+      responseType: 'blob',
     })
-    if (!resp.ok) throw new Error('导出失败')
-    const blob = await resp.blob()
+    const blob = resp instanceof Blob ? resp : await resp.data
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
     const ext = format === 'xlsx' ? 'xlsx' : format === 'csv' ? 'csv' : 'json'

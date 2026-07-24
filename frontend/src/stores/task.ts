@@ -81,7 +81,7 @@ export const useTaskStore = defineStore('task', () => {
       const res = await dashboardApi.getStats()
       dashboardStats.value = res.data
     } catch (e) {
-      console.error('刷新Dashboard失败:', e)
+      if (import.meta.env.DEV) console.error('刷新Dashboard失败:', e)
     }
   }
 

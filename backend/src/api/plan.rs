@@ -79,12 +79,15 @@ async fn create_plan(
 /// 获取计划详情
 async fn get_plan(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Path(plan_id): Path<String>,
 ) -> Result<Json<crate::utils::response::ApiResponse<PlanWithItems>>, AppError> {
     let plan = PlanService::get_plan(&state.db, &plan_id)
         .await
         .map_err(|e| AppError::not_found(&e.to_string()))?;
+    if plan.plan.user_id != claims.sub {
+        return Err(AppError::unauthorized("无权访问此计划"));
+    }
     Ok(Json(ok(plan)))
 }
 
@@ -140,10 +143,16 @@ async fn run_plan(
 /// 列出计划运行历史（支持时间筛选）
 async fn list_plan_runs(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Path(plan_id): Path<String>,
     Query(q): Query<RunListQuery>,
 ) -> Result<Json<crate::utils::response::ApiResponse<Vec<PlanRunWithTasks>>>, AppError> {
+    let plan = PlanService::get_plan(&state.db, &plan_id)
+        .await
+        .map_err(|e| AppError::not_found(&e.to_string()))?;
+    if plan.plan.user_id != claims.sub {
+        return Err(AppError::unauthorized("无权访问此计划"));
+    }
     let runs = PlanService::list_plan_runs_filtered(
         &state.db, &plan_id,
         q.start.as_deref(),
@@ -181,10 +190,16 @@ struct RunListQuery {
 /// 导出计划运行的全部 task 结果（合并到 1 个文件）
 async fn export_plan_run(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Path((plan_id, run_id)): Path<(String, String)>,
     Query(q): Query<ExportQuery>,
 ) -> Result<axum::response::Response, AppError> {
+    let plan = PlanService::get_plan(&state.db, &plan_id)
+        .await
+        .map_err(|e| AppError::not_found(&e.to_string()))?;
+    if plan.plan.user_id != claims.sub {
+        return Err(AppError::unauthorized("无权访问此计划"));
+    }
     // 获取 plan_run 及其 task_ids
     let run = sqlx::query_as::<_, crate::models::plan::TaskPlanRun>(
         "SELECT * FROM task_plan_runs WHERE id = ? AND plan_id = ?",

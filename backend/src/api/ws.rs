@@ -10,7 +10,8 @@ use axum::{
 use serde::Deserialize;
 use tracing::{info, warn};
 
-use crate::utils::response::{AppState, ProgressMessage};
+use crate::services::auth_service::{AuthService, Claims};
+use crate::utils::response::{AppError, AppState, ProgressMessage};
 
 /// 构建 WebSocket 路由
 pub fn ws_routes() -> Router<AppState> {
@@ -21,6 +22,8 @@ pub fn ws_routes() -> Router<AppState> {
 struct WsQuery {
     /// 可选：直接订阅指定 task_id
     task_id: Option<String>,
+    /// JWT token（用于认证）
+    token: Option<String>,
 }
 
 /// WebSocket 连接处理
@@ -28,8 +31,18 @@ async fn ws_handler(
     State(state): State<AppState>,
     Query(query): Query<WsQuery>,
     ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_ws(socket, state, query.task_id))
+) -> Result<impl IntoResponse, AppError> {
+    // 验证 token
+    let _claims: Claims = match &query.token {
+        Some(token) => {
+            AuthService::verify_token(&state.config, token)
+                .map_err(|_| AppError::unauthorized("Token 无效或已过期"))?
+        }
+        None => {
+            return Err(AppError::unauthorized("缺少认证 Token"));
+        }
+    };
+    Ok(ws.on_upgrade(move |socket| handle_ws(socket, state, query.task_id)))
 }
 
 /// 处理 WebSocket 连接

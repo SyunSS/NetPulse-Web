@@ -31,6 +31,17 @@ impl PingEngine {
     pub async fn test_ping(&self, host: &str) -> PingTestResult {
         info!("Ping 测试开始: {}", host);
         let target = extract_host(host);
+        if !validate_hostname(&target) {
+            return PingTestResult {
+                host: target,
+                avg_latency_ms: 0.0,
+                packet_loss_rate: 100.0,
+                jitter_ms: 0.0,
+                success: false,
+                method: None,
+                error: Some(format!("无效的主机名: {}", target)),
+            };
+        }
 
         // 1. ICMP
         let count = self.count;
@@ -214,6 +225,12 @@ async fn run_tcp_ping(host: &str, port: u16, count: u32) -> PingTestResult {
         method: Some(method),
         error: if loss >= 100.0 { Some(format!("TCP:{} 全部超时或拒绝", port)) } else { None },
     }
+}
+
+/// 验证 hostname 是否合法（仅允许域名、IPv4、IPv6）
+fn validate_hostname(host: &str) -> bool {
+    // 允许字母数字、点、冒号、短横线、下划线（用于 SRV 记录）
+    !host.is_empty() && host.chars().all(|c| c.is_alphanumeric() || c == '.' || c == ':' || c == '-' || c == '_')
 }
 
 /// 从 URL 提取主机名

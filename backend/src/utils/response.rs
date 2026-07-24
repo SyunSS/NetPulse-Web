@@ -6,6 +6,7 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::config::AppConfig;
 use crate::models::task::WebsiteResult;
+use crate::utils::ratelimit::RateLimiter;
 
 /// 统一 API 响应格式
 #[derive(Debug, Serialize)]
@@ -89,7 +90,13 @@ impl AppError {
     }
 
     pub fn internal(msg: &str) -> Self {
-        Self::with_status(5000, msg, StatusCode::INTERNAL_SERVER_ERROR)
+        // 生产环境隐藏内部错误详情
+        let safe_msg = if cfg!(debug_assertions) {
+            msg.to_string()
+        } else {
+            "服务器内部错误".to_string()
+        };
+        Self::with_status(5000, &safe_msg, StatusCode::INTERNAL_SERVER_ERROR)
     }
 }
 
@@ -131,6 +138,7 @@ pub struct AppState {
     pub task_tx: mpsc::Sender<TaskJob>,
     pub progress_tx: broadcast::Sender<ProgressMessage>,
     pub cancel_tx: broadcast::Sender<String>,
+    pub rate_limiter: std::sync::Arc<RateLimiter>,
 }
 
 /// 任务作业 — 通过 channel 发送给 Worker

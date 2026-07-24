@@ -40,6 +40,9 @@ async fn create_task(
     if req.urls.is_empty() {
         return Err(AppError::bad_request("测试URL列表不能为空"));
     }
+    for url in &req.urls {
+        crate::utils::url::validate_url(url).map_err(AppError::bad_request)?;
+    }
 
     let valid_types = ["website", "download", "video"];
     if !valid_types.contains(&req.task_type.as_str()) {
@@ -89,33 +92,53 @@ async fn list_tasks(
 /// 获取任务详情
 async fn get_task(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Path(task_id): Path<String>,
 ) -> Result<Json<crate::utils::response::ApiResponse<TestTask>>, AppError> {
     let task = TaskService::get_task(&state.db, &task_id)
         .await
         .map_err(|e| AppError::not_found(&e.to_string()))?;
+    if task.user_id != claims.sub {
+        return Err(AppError::unauthorized("无权访问此任务"));
+    }
     Ok(Json(ok(task)))
 }
 
 /// 获取网站测试结果
 async fn get_task_results(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Path(task_id): Path<String>,
 ) -> Result<Json<crate::utils::response::ApiResponse<Vec<WebsiteResult>>>, AppError> {
+    let task = TaskService::get_task(&state.db, &task_id)
+        .await
+        .map_err(|e| AppError::not_found(&e.to_string()))?;
+    if task.user_id != claims.sub {
+        return Err(AppError::unauthorized("无权访问此任务"));
+    }
     let results = TaskService::get_task_results(&state.db, &task_id)
         .await
         .map_err(|e| AppError::internal(&e.to_string()))?;
     Ok(Json(ok(results)))
 }
 
+async fn check_task_owner(state: &AppState, claims: &Claims, task_id: &str) -> Result<TestTask, AppError> {
+    let task = TaskService::get_task(&state.db, task_id)
+        .await
+        .map_err(|e| AppError::not_found(&e.to_string()))?;
+    if task.user_id != claims.sub {
+        return Err(AppError::unauthorized("无权访问此任务"));
+    }
+    Ok(task)
+}
+
 /// 获取视频测试结果
 async fn get_video_results(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Path(task_id): Path<String>,
 ) -> Result<Json<crate::utils::response::ApiResponse<Vec<VideoResult>>>, AppError> {
+    let _task = check_task_owner(&state, &claims, &task_id).await?;
     let results = TaskService::get_video_results(&state.db, &task_id)
         .await
         .map_err(|e| AppError::internal(&e.to_string()))?;
@@ -125,9 +148,10 @@ async fn get_video_results(
 /// 获取下载测试结果
 async fn get_download_results(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Path(task_id): Path<String>,
 ) -> Result<Json<crate::utils::response::ApiResponse<Vec<DownloadResult>>>, AppError> {
+    let _task = check_task_owner(&state, &claims, &task_id).await?;
     let results = TaskService::get_download_results(&state.db, &task_id)
         .await
         .map_err(|e| AppError::internal(&e.to_string()))?;
@@ -137,9 +161,10 @@ async fn get_download_results(
 /// 获取 Ping 测试结果
 async fn get_ping_results(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Path(task_id): Path<String>,
 ) -> Result<Json<crate::utils::response::ApiResponse<Vec<PingResult>>>, AppError> {
+    let _task = check_task_owner(&state, &claims, &task_id).await?;
     let results = TaskService::get_ping_results(&state.db, &task_id)
         .await
         .map_err(|e| AppError::internal(&e.to_string()))?;
@@ -149,9 +174,10 @@ async fn get_ping_results(
 /// 取消任务
 async fn cancel_task(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Path(task_id): Path<String>,
 ) -> Result<Json<crate::utils::response::ApiResponse<()>>, AppError> {
+    let _task = check_task_owner(&state, &claims, &task_id).await?;
     TaskService::cancel_task(&state.db, &state.cancel_tx, &task_id)
         .await
         .map_err(|e| AppError::internal(&e.to_string()))?;
@@ -161,9 +187,10 @@ async fn cancel_task(
 /// 重试任务
 async fn retry_task(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Path(task_id): Path<String>,
 ) -> Result<Json<crate::utils::response::ApiResponse<CreateTaskResponse>>, AppError> {
+    let _task = check_task_owner(&state, &claims, &task_id).await?;
     let resp = TaskService::retry_task(&state.db, &state.task_tx, &task_id)
         .await
         .map_err(|e| AppError::internal(&e.to_string()))?;
@@ -184,13 +211,11 @@ fn default_format() -> String {
 /// 导出测试结果
 async fn export_result(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Path(task_id): Path<String>,
     Query(query): Query<ExportQuery>,
 ) -> Result<Response, AppError> {
-    let task = TaskService::get_task(&state.db, &task_id)
-        .await
-        .map_err(|e| AppError::not_found(&e.to_string()))?;
+    let task = check_task_owner(&state, &claims, &task_id).await?;
 
     StorageManager::ensure_dir(&state.config.storage.excel_dir)
         .map_err(|e| AppError::internal(&e.to_string()))?;
@@ -316,6 +341,9 @@ async fn import_tasks(
             .map(|a| a.iter().filter_map(|u| u.as_str().map(String::from)).collect())
             .unwrap_or_default();
         if urls.is_empty() { failed += 1; continue; }
+        // 验证 URL 安全
+        let has_invalid = urls.iter().any(|u| crate::utils::url::validate_url(u).is_err());
+        if has_invalid { failed += 1; continue; }
 
         let rc = item.get("options").and_then(|o| o.get("repeat_count"))
             .and_then(|v| v.as_u64()).unwrap_or(1) as usize;
@@ -387,9 +415,10 @@ async fn download_template() -> Result<Json<crate::utils::response::ApiResponse<
 /// 获取任务运行日志
 async fn get_task_logs(
     State(state): State<AppState>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     Path(task_id): Path<String>,
 ) -> Result<Json<crate::utils::response::ApiResponse<Vec<TaskLogEntry>>>, AppError> {
+    let _task = check_task_owner(&state, &claims, &task_id).await?;
     use crate::models::task::TaskLog;
     let logs = sqlx::query_as::<_, TaskLog>(
         "SELECT * FROM task_log WHERE task_id = ? ORDER BY created_at ASC"
