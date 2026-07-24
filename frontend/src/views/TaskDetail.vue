@@ -306,7 +306,7 @@ const stClass = (s: string) => `st st-${s}`
 
 .loading-box { text-align:center; padding:80px 20px; color:var(--text-tertiary); font-size:15px; }
 
-.card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-lg); padding:20px; margin-bottom:14px; }
+.card, .info-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-lg); padding:20px; margin-bottom:16px; }
 .card-title { font-size:15px; font-weight:600; margin-bottom:14px; color:var(--text-primary); }
 .info-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
 .info-item { padding:8px 12px; background:var(--bg-hover); border-radius:var(--radius-sm); display:flex; align-items:center; gap:8px; font-size:13px; }
