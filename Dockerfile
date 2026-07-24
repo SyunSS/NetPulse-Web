@@ -29,7 +29,7 @@ RUN pnpm install --no-frozen-lockfile && pnpm build
 # ====== 阶段3: 运行镜像 ======
 FROM debian:trixie-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y \
     ca-certificates libssl3 chromium fonts-noto-cjk fonts-liberation wget iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
