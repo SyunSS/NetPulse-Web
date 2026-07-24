@@ -334,7 +334,7 @@ onMounted(() => {
       <button class="back-btn" @click="router.push('/plans')">← 返回</button>
       <h1 class="page-title">{{ isEdit ? '编辑计划' : '新建计划' }}</h1>
       <div class="header-actions">
-        <button v-if="isEdit" class="action-btn primary" @click="handleRunNow">▶ 立即运行</button>
+        <button v-if="isEdit" class="action-btn primary" @click="handleRunNow">立即运行</button>
         <button class="action-btn primary" :disabled="saving" @click="handleSave">
           {{ saving ? '保存中...' : '保存计划' }}
         </button>
@@ -344,7 +344,7 @@ onMounted(() => {
     <div class="form-container">
       <!-- 基本信息 -->
       <section class="form-section">
-        <h2 class="section-title">📝 计划信息</h2>
+        <h2 class="section-title">计划信息</h2>
         <div class="form-row">
           <label class="form-label">计划名 <span class="required">*</span></label>
           <input v-model="name" type="text" class="form-input" placeholder="例如：每日首页检测" />
@@ -364,7 +364,7 @@ onMounted(() => {
 
       <!-- 调度 -->
       <section class="form-section">
-        <h2 class="section-title">⏰ 调度</h2>
+        <h2 class="section-title">调度</h2>
         <div class="cron-tabs">
           <div
             class="cron-tab"
@@ -402,7 +402,6 @@ onMounted(() => {
           </div>
         </div>
         <div v-if="nextRunPreview" class="next-run-preview">
-          <span class="preview-icon">▶</span>
           预计执行: <strong>{{ nextRunPreview }}</strong>
         </div>
       </section>
@@ -410,11 +409,11 @@ onMounted(() => {
       <!-- 测试项 -->
       <section class="form-section">
         <div class="section-header">
-          <h2 class="section-title">🎯 测试项 <span class="required">*</span></h2>
+          <h2 class="section-title">测试项 <span class="required">*</span></h2>
           <div style="display:flex;gap:8px">
             <input type="file" ref="fileInput" accept=".txt,.csv" style="display:none" @change="handleFileImport" />
-            <button class="action-btn" @click="fileInput?.click()">📄 导入文件</button>
-            <button class="action-btn" @click="downloadPlanTemplate">📥 下载模板</button>
+            <button class="action-btn" @click="fileInput?.click()">导入文件</button>
+            <button class="action-btn" @click="downloadPlanTemplate">下载模板</button>
             <button class="add-item-btn" @click="addItem">+ 添加测试项</button>
           </div>
         </div>
@@ -443,7 +442,9 @@ onMounted(() => {
                 :value="(item.options as any)?.ping_count ?? 10"
                 @input="(e: any) => { const v = parseInt(e.target.value)||10; (item.options as any).ping_count = v }"
                 type="number" min="1" max="100" class="repeat-input" />
-              <button class="remove-btn" @click="removeItem(idx)">🗑</button>
+              <button class="remove-btn" @click="removeItem(idx)" title="删除">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 4h10M5 4V2.5A.5.5 0 0 1 5.5 2h3a.5.5 0 0 1 .5.5V4m1 0v7.5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
             </div>
             <div class="urls-section">
               <label class="urls-label">URL 列表 <span class="required">*</span></label>
@@ -528,15 +529,14 @@ onMounted(() => {
 }
 
 .action-btn.primary {
-  background: var(--gradient-primary);
+  background: var(--color-primary);
   color: white;
   border: none;
   font-weight: 600;
 }
 
 .action-btn.primary:hover:not(:disabled) {
-  box-shadow: var(--shadow-glow);
-  transform: translateY(-1px);
+  background: var(--color-primary-active);
 }
 
 .action-btn:disabled {
@@ -613,7 +613,7 @@ onMounted(() => {
 .form-input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(32, 128, 240, 0.1);
+  box-shadow: 0 0 0 2px var(--color-primary-bg);
 }
 
 /* 开关 */
@@ -713,7 +713,7 @@ onMounted(() => {
 }
 
 .cron-preset.active {
-  background: rgba(32, 128, 240, 0.08);
+  background: var(--color-primary-bg);
   border-color: var(--color-primary);
 }
 
@@ -772,18 +772,15 @@ onMounted(() => {
   gap: 8px;
   margin-top: 12px;
   padding: 10px 14px;
-  background: rgba(24, 160, 88, 0.08);
-  border-radius: var(--radius-md);
-  color: var(--color-success);
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
   font-size: 13px;
-}
-
-.preview-icon {
-  font-size: 14px;
 }
 
 .next-run-preview strong {
   font-weight: 600;
+  color: var(--color-success);
 }
 
 /* 测试项 */
@@ -802,7 +799,7 @@ onMounted(() => {
 .add-item-btn:hover {
   border-color: var(--color-primary);
   color: var(--color-primary);
-  background: rgba(32, 128, 240, 0.05);
+  background: var(--color-primary-bg);
 }
 
 .empty-items {

@@ -40,17 +40,16 @@ Single binary: backend serves `frontend-dist/` if present, else API-only. Nginx 
 ## Key Details
 
 - **Auth**: JWT middleware on `/api/task`, `/api/plan`, `/api/admin`, `/api/dashboard`. Public: `/api/health`, `/api/auth/*`, `/api/ws`.
-- **Config**: `config.toml` + env overrides with `NETPULSE__` prefix (e.g. `NETPULSE__DATABASE__PATH`).
+- **Config**: loads `config/config.toml` first, falls back to `config.toml` (auto-creates default if neither exists). Env overrides with `NETPULSE__` prefix (e.g. `NETPULSE__DATABASE__PATH`).
 - **DB**: SQLite with WAL, schema created inline (no sqlx migrations). `add_column_if_missing` for incremental schema changes.
 - **Browser (Website)**: `headless_chrome` crate used directly, no trait abstraction. `ChromePage` + `launch_browser()`/`new_page()` in `browser/provider.rs`.
 - **Browser (Video)**: `chromiumoxide` crate (async) — dedicated `[video_browser]` config section with separate chromium path.
-- **Video**: `ChromiumoxideBrowser` → CDP collectors (`cdp/media.rs`, `network.rs`, `performance.rs`, `runtime.rs`, `page.rs`) + JS hooks (`hooks/`) + PlayerAdapter trait (`players/registry.rs` dispatches to Bilibili/YouTube/Generic). Player detection is code-driven, not config-driven.
-- **VideoConfig**: `video_selector` and `wait_seconds` removed from `[[video_platforms]]`. Detection logic handled by `PlayerAdapter::detect()`. `detect_only` flag retained for Netflix.
+- **Video**: `ChromiumoxideBrowser` → CDP collectors + JS hooks + `PlayerAdapter` trait (`players/registry.rs` dispatches to Bilibili/YouTube/Generic). Platform detection is code-driven by URL keyword matching in `config.toml:[[video_platforms]]`. `detect_only` flag for Netflix skips play.
 - **Metrics system**: `metric_definition` table seeded with 16 built-in metrics (dns_time, tcp_time, lcp, cls, etc.). `metric_profile` groups metrics per user. `task_metric_config` binds selected metrics to a task. API at `/api/metrics/*`.
-- **Chrome**: Requires `chromium` binary at the configured path. Sandbox disabled (`--no-sandbox`).
-- **Ping**: ICMP primary, TCP SYN fallback.
+- **Chrome**: Requires `chromium` binary at configured path. Sandbox disabled (`--no-sandbox`). Website and video engines each launch a separate Chromium process — two concurrent Chromium instances is normal. Docker sets `CHROME_PATH` as convention only; the app reads `browser.path` from config (or `NETPULSE__BROWSER__PATH`).
+- **Ping**: ICMP via system `ping` command (`spawn_blocking`), falls back to TCP connect on port 80 → 443. On Linux, ICMP may need `CAP_NET_RAW` or root (macOS works without special perms).
 - **Tests**: Minimal — only `dns/mod.rs` and `ping/mod.rs` have `#[cfg(test)]` blocks. No integration test harness.
-- **Frontend deps**: pnpm. Vite `@` alias → `src/`. Layout system with dark theme + zhCN i18n (Naive UI).
+- **Frontend deps**: pnpm. Vite `@` alias → `src/`. Layout system with dark theme + zhCN i18n (Naive UI). TypeScript is lenient: `noUnusedLocals: false`, `noUnusedParameters: false`.
 - **Cron**: Scheduler polls every 60s, cron parsing via `cron` crate, `compute_next_run` in `plan_service`.
 
 ## Common Mistakes

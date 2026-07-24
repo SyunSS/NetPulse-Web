@@ -17,7 +17,7 @@ const pageTitle = computed(() => {
     'TaskDetail': '任务详情',
     'Settings': '系统设置',
   }
-  return titles[String(route.name)] || 'NetPulse Web'
+  return titles[String(route.name)] || 'NetPulse'
 })
 </script>
 
@@ -28,12 +28,12 @@ const pageTitle = computed(() => {
       <header class="topbar">
         <div class="topbar-left">
           <button class="collapse-btn" @click="collapsed = !collapsed" :title="collapsed ? '展开' : '折叠'">
-            {{ collapsed ? '»' : '«' }}
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path v-if="!collapsed" d="M10 4L6 8l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path v-else d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
           </button>
           <h1 class="page-title">{{ pageTitle }}</h1>
-        </div>
-        <div class="topbar-right">
-          <span class="env-tag">v0.2 · Plan System</span>
         </div>
       </header>
 
@@ -56,7 +56,7 @@ const pageTitle = computed(() => {
 }
 
 .sidebar-slot {
-  width: 240px;
+  width: 220px;
   transition: width var(--transition-base);
 }
 
@@ -64,9 +64,32 @@ const pageTitle = computed(() => {
   width: 64px;
 }
 
-.sidebar-slot.collapsed :deep(.logo-text),
+.sidebar-slot.collapsed :deep(.logo-marker) {
+  margin: 0 auto;
+}
+
+.sidebar-slot.collapsed :deep(.logo-title),
 .sidebar-slot.collapsed :deep(.nav-label),
-.sidebar-slot.collapsed :deep(.user-details) {
+.sidebar-slot.collapsed :deep(.user-details),
+.sidebar-slot.collapsed :deep(.nav-marker) {
+  display: none;
+}
+
+.sidebar-slot.collapsed :deep(.nav-item) {
+  justify-content: center;
+  padding: 8px;
+}
+
+.sidebar-slot.collapsed :deep(.sidebar-header) {
+  display: flex;
+  justify-content: center;
+}
+
+.sidebar-slot.collapsed :deep(.user-info) {
+  justify-content: center;
+}
+
+.sidebar-slot.collapsed :deep(.logout-btn) {
   display: none;
 }
 
@@ -79,12 +102,12 @@ const pageTitle = computed(() => {
 }
 
 .topbar {
-  height: 60px;
-  padding: 0 24px;
+  height: 48px;
+  padding: 0 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--bg-card);
+  background: var(--bg-body);
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
 }
@@ -92,18 +115,17 @@ const pageTitle = computed(() => {
 .topbar-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .collapse-btn {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border: 1px solid var(--border-color);
-  background: var(--bg-card);
-  color: var(--text-secondary);
+  background: transparent;
+  color: var(--text-tertiary);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -116,44 +138,25 @@ const pageTitle = computed(() => {
 }
 
 .page-title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
-}
-
-.topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.env-tag {
-  padding: 4px 10px;
-  font-size: 11px;
-  color: var(--text-tertiary);
-  background: var(--bg-hover);
-  border-radius: var(--radius-sm);
-  font-weight: 500;
 }
 
 .content {
   flex: 1;
   padding: 24px;
   overflow-y: auto;
+  background: var(--bg-alt);
 }
 
-/* 路由切换动画 */
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition: opacity 0.15s ease;
 }
-.fade-enter-from {
-  opacity: 0;
-  transform: translateY(8px);
-}
+.fade-enter-from,
 .fade-leave-to {
   opacity: 0;
-  transform: translateY(-8px);
 }
 </style>

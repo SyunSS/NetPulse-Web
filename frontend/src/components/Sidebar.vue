@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
@@ -10,28 +9,21 @@ const authStore = useAuthStore()
 interface NavItem {
   key: string
   label: string
-  icon: string
   to: string
-  badge?: string
 }
 
 const navItems: NavItem[] = [
-  { key: 'dashboard', label: '概览', icon: '📊', to: '/' },
-  { key: 'create', label: '创建任务', icon: '➕', to: '/create' },
-  { key: 'plans', label: '测试计划', icon: '📋', to: '/plans' },
-  { key: 'history', label: '历史记录', icon: '🕘', to: '/history' },
-  { key: 'settings', label: '系统设置', icon: '⚙️', to: '/settings' },
+  { key: 'dashboard', label: '概览', to: '/' },
+  { key: 'create', label: '创建任务', to: '/create' },
+  { key: 'plans', label: '测试计划', to: '/plans' },
+  { key: 'history', label: '历史记录', to: '/history' },
+  { key: 'settings', label: '系统设置', to: '/settings' },
 ]
 
 const isActive = (path: string) => {
   if (path === '/') return route.path === '/'
   return route.path.startsWith(path)
 }
-
-const pageTitle = computed(() => {
-  const item = navItems.find(item => isActive(item.to))
-  return item?.label || 'NetPulse Web'
-})
 
 const goTo = (path: string) => {
   if (path !== route.path) router.push(path)
@@ -47,11 +39,8 @@ const handleLogout = () => {
   <aside class="sidebar">
     <div class="sidebar-header">
       <div class="logo">
-        <div class="logo-icon">⚡</div>
-        <div class="logo-text">
-          <div class="logo-title brand-gradient">NetPulse</div>
-          <div class="logo-subtitle">网络质量测试</div>
-        </div>
+        <span class="logo-marker">◆</span>
+        <span class="logo-title">NetPulse</span>
       </div>
     </div>
 
@@ -63,9 +52,8 @@ const handleLogout = () => {
         :class="{ active: isActive(item.to) }"
         @click="goTo(item.to)"
       >
-        <span class="nav-icon">{{ item.icon }}</span>
+        <span class="nav-marker" v-if="isActive(item.to)"></span>
         <span class="nav-label">{{ item.label }}</span>
-        <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
       </div>
     </nav>
 
@@ -78,7 +66,7 @@ const handleLogout = () => {
         </div>
       </div>
       <button class="logout-btn" @click="handleLogout" title="退出登录">
-        ↗
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3m5-4 2-2-2-2m2 2H7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
     </div>
   </aside>
@@ -86,9 +74,9 @@ const handleLogout = () => {
 
 <style scoped>
 .sidebar {
-  width: 240px;
+  width: 220px;
   height: 100vh;
-  background: var(--bg-sidebar);
+  background: var(--bg-body);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
@@ -97,58 +85,44 @@ const handleLogout = () => {
 }
 
 .sidebar-header {
-  padding: 24px 20px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 20px 16px 12px;
 }
 
 .logo {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
-.logo-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-md);
-  background: var(--gradient-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  color: white;
-  box-shadow: var(--shadow-glow);
+.logo-marker {
+  font-size: 14px;
+  color: var(--color-primary);
 }
 
 .logo-title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
-  line-height: 1.2;
-}
-
-.logo-subtitle {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-top: 2px;
+  color: var(--text-primary);
+  letter-spacing: -0.25px;
 }
 
 .sidebar-nav {
   flex: 1;
-  padding: 16px 12px;
+  padding: 8px 8px;
   overflow-y: auto;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border-radius: var(--radius-md);
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   transition: all var(--transition-fast);
   position: relative;
 }
@@ -159,41 +133,26 @@ const handleLogout = () => {
 }
 
 .nav-item.active {
-  background: var(--gradient-card);
-  color: var(--text-primary);
+  background: var(--color-primary-bg);
+  color: var(--color-primary-text);
+  font-weight: 600;
 }
 
-.nav-item.active::before {
-  content: '';
+.nav-marker {
   position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
+  left: -8px;
   width: 3px;
-  background: var(--gradient-primary);
-  border-radius: 0 3px 3px 0;
-}
-
-.nav-icon {
-  font-size: 18px;
-  width: 24px;
-  text-align: center;
+  height: 16px;
+  background: var(--color-primary);
+  border-radius: 0 2px 2px 0;
 }
 
 .nav-label {
   flex: 1;
 }
 
-.nav-badge {
-  background: var(--color-danger);
-  color: white;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 8px;
-}
-
 .sidebar-footer {
-  padding: 16px;
+  padding: 12px 12px;
   border-top: 1px solid var(--border-color);
   display: flex;
   align-items: center;
@@ -203,22 +162,23 @@ const handleLogout = () => {
 .user-info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex: 1;
   min-width: 0;
 }
 
 .user-avatar {
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background: var(--gradient-primary);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--text-secondary);
   font-weight: 600;
-  font-size: 14px;
+  font-size: 12px;
   flex-shrink: 0;
 }
 
@@ -242,19 +202,21 @@ const handleLogout = () => {
 }
 
 .logout-btn {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: var(--bg-hover);
-  color: var(--text-secondary);
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-tertiary);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: all var(--transition-fast);
 }
 
 .logout-btn:hover {
-  background: var(--color-danger);
-  color: white;
+  color: var(--color-danger);
+  border-color: var(--color-danger);
 }
 </style>

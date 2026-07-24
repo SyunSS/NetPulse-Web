@@ -121,7 +121,7 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
     <!-- 欢迎横幅 -->
     <div class="welcome-banner">
       <div class="banner-content">
-        <h2 class="banner-title">👋 欢迎使用 NetPulse Web</h2>
+        <h2 class="banner-title">欢迎使用 NetPulse</h2>
         <p class="banner-subtitle">专业的网络质量测试平台 · 支持网站、视频、下载三大引擎</p>
       </div>
       <button class="banner-btn" @click="router.push('/plans/new')">+ 新建计划</button>
@@ -130,7 +130,7 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
     <!-- 统计卡片 -->
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-icon" style="background: rgba(32, 128, 240, 0.1); color: var(--color-primary)">📋</div>
+        <div class="stat-bar" style="background: var(--color-primary)"></div>
         <div class="stat-content">
           <div class="stat-label">启用计划</div>
           <div class="stat-value">{{ enabledPlanCount() }}</div>
@@ -138,7 +138,7 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: rgba(24, 160, 88, 0.1); color: var(--color-success)">⏰</div>
+        <div class="stat-bar" style="background: var(--color-success)"></div>
         <div class="stat-content">
           <div class="stat-label">定时任务</div>
           <div class="stat-value">{{ cronPlanCount() }}</div>
@@ -146,7 +146,7 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: rgba(240, 160, 32, 0.1); color: var(--color-warning)">🎯</div>
+        <div class="stat-bar" style="background: var(--color-warning)"></div>
         <div class="stat-content">
           <div class="stat-label">测试项</div>
           <div class="stat-value">{{ totalItems() }}</div>
@@ -154,7 +154,7 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: rgba(208, 48, 80, 0.1); color: var(--color-danger)">🕘</div>
+        <div class="stat-bar" style="background: var(--color-danger)"></div>
         <div class="stat-content">
           <div class="stat-label">今日测试</div>
           <div class="stat-value">{{ taskStore.dashboardStats?.today_tests ?? 0 }}</div>
@@ -166,21 +166,21 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
     <!-- 性能指标 -->
     <div class="metrics-grid">
       <div class="metric-card">
-        <div class="metric-icon">⚡</div>
+        <div class="metric-indicator"></div>
         <div class="metric-content">
           <div class="metric-label">平均 DNS</div>
           <div class="metric-value">{{ formatMs(taskStore.dashboardStats?.avg_dns ?? 0) }}</div>
         </div>
       </div>
       <div class="metric-card">
-        <div class="metric-icon">🌐</div>
+        <div class="metric-indicator"></div>
         <div class="metric-content">
           <div class="metric-label">平均 TTFB</div>
           <div class="metric-value">{{ formatMs(taskStore.dashboardStats?.avg_ttfb ?? 0) }}</div>
         </div>
       </div>
       <div class="metric-card">
-        <div class="metric-icon">📄</div>
+        <div class="metric-indicator"></div>
         <div class="metric-content">
           <div class="metric-label">平均首屏</div>
           <div class="metric-value">{{ formatMs(taskStore.dashboardStats?.avg_page_time ?? 0) }}</div>
@@ -191,11 +191,11 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
     <!-- 图表 + 即将执行 -->
     <div class="charts-grid">
       <div class="chart-card">
-        <h3 class="card-title">📈 性能趋势</h3>
+        <h3 class="card-title">性能趋势</h3>
         <v-chart :option="trendOption" style="height: 280px" autoresize />
       </div>
       <div class="chart-card">
-        <h3 class="card-title">📊 任务类型分布</h3>
+        <h3 class="card-title">任务类型分布</h3>
         <v-chart :option="pieOption" style="height: 280px" autoresize />
       </div>
     </div>
@@ -204,7 +204,7 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
     <div class="bottom-grid">
       <div class="bottom-card">
         <div class="card-header">
-          <h3 class="card-title">📅 即将执行</h3>
+          <h3 class="card-title">即将执行</h3>
           <button class="link-btn" @click="router.push('/plans')">查看全部 →</button>
         </div>
         <div v-if="upcomingPlans().length === 0" class="mini-empty">
@@ -217,7 +217,7 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
             class="upcoming-item"
             @click="router.push(`/plans/${plan.id}/runs`)"
           >
-            <div class="upcoming-icon">⏰</div>
+            <div class="upcoming-dot"></div>
             <div class="upcoming-content">
               <div class="upcoming-name">{{ plan.name }}</div>
               <div class="upcoming-time">{{ formatTime(plan.next_run_at!) }}</div>
@@ -227,7 +227,7 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
       </div>
       <div class="bottom-card">
         <div class="card-header">
-          <h3 class="card-title">📋 最近计划</h3>
+          <h3 class="card-title">最近计划</h3>
           <button class="link-btn" @click="router.push('/plans')">查看全部 →</button>
         </div>
         <div v-if="planStore.plans.length === 0" class="mini-empty">
@@ -256,7 +256,7 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
 }
 
 .welcome-banner {
-  background: var(--gradient-primary);
+  background: var(--color-primary);
   border-radius: var(--radius-lg);
   padding: 24px 32px;
   margin-bottom: 24px;
@@ -264,32 +264,32 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
   align-items: center;
   justify-content: space-between;
   color: white;
-  box-shadow: var(--shadow-md);
 }
 
 .banner-title {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
-  margin: 0 0 6px 0;
+  margin: 0 0 4px 0;
+  letter-spacing: -0.25px;
 }
 
 .banner-subtitle {
   font-size: 13px;
-  opacity: 0.9;
+  opacity: 0.85;
   margin: 0;
+  font-weight: 400;
 }
 
 .banner-btn {
-  padding: 10px 20px;
+  padding: 8px 16px;
   background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.25);
   color: white;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-fast);
-  backdrop-filter: blur(10px);
 }
 
 .banner-btn:hover {
@@ -311,22 +311,17 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
   display: flex;
   align-items: center;
   gap: 16px;
-  transition: all var(--transition-base);
+  transition: all var(--transition-fast);
 }
 
 .stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-card);
 }
 
-.stat-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
+.stat-bar {
+  width: 3px;
+  height: 32px;
+  border-radius: 2px;
   flex-shrink: 0;
 }
 
@@ -369,8 +364,12 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
   gap: 12px;
 }
 
-.metric-icon {
-  font-size: 24px;
+.metric-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  flex-shrink: 0;
 }
 
 .metric-label {
@@ -464,8 +463,11 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
   background: var(--bg-hover);
 }
 
-.upcoming-icon {
-  font-size: 18px;
+.upcoming-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
   flex-shrink: 0;
 }
 

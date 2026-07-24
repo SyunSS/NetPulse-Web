@@ -97,8 +97,8 @@ async function doCreate() {
 
     <n-card class="tpl-card">
       <div class="tpl-row">
-        <div><h3>📋 不知道格式？</h3><p>下载模板，含全部 4 种类型的 JSON 示例</p></div>
-        <n-space><n-button ghost type="info" @click="loadTemplate">👁 预览</n-button><n-button type="primary" @click="downloadTemplateFile">📥 下载模板</n-button></n-space>
+        <div><h3>不知道格式？</h3><p>下载模板，含全部 4 种类型的 JSON 示例</p></div>
+        <n-space><n-button ghost type="info" @click="loadTemplate">预览</n-button><n-button type="primary" @click="downloadTemplateFile">下载模板</n-button></n-space>
       </div>
       <div v-if="templateData" class="tpl-tags">
         <n-tag v-for="t in templateData.supported_types" :key="t" size="small" round type="info">{{ t }}</n-tag>
@@ -124,7 +124,7 @@ async function doCreate() {
 
     <n-grid :cols="2" :x-gap="24">
       <n-gi>
-        <n-card title="✍️ 手动输入" bordered>
+        <n-card title="手动输入" bordered>
           <n-space vertical size="medium">
             <div><n-text depth="3">类型</n-text><n-radio-group v-model:value="taskType"><n-radio v-for="o in typeOptions" :key="o.value" :value="o.value">{{ o.label }}</n-radio></n-radio-group></div>
             <div><n-text depth="3">重复次数 (>1 取平均)</n-text><n-input-number v-model:value="repeatCount" :min="1" :max="10" style="max-width:120px" /></div>
@@ -137,7 +137,7 @@ async function doCreate() {
       </n-gi>
 
       <n-gi>
-        <n-card title="📁 批量导入" bordered>
+        <n-card title="批量导入" bordered>
           <n-space vertical size="medium">
             <n-upload :multiple="false" accept=".json" :show-file-list="false" @change="handleFileChange">
               <n-upload-dragger>
@@ -161,8 +161,8 @@ async function doCreate() {
 <style scoped>
 .create-task { padding:8px 0; max-width:1200px }
 .page-title { font-size:24px; font-weight:600; margin-bottom:24px }
-.tpl-card { background:linear-gradient(135deg,var(--primary-color-suppl,#e8f4fd),transparent) }
+.tpl-card { background: var(--bg-alt) }
 .tpl-row { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px }
-.tpl-row h3 { margin:0 0 4px } .tpl-row p { margin:0; color:var(--n-text-color-3); font-size:13px }
+.tpl-row h3 { margin:0 0 4px } .tpl-row p { margin:0; color:var(--text-tertiary); font-size:13px }
 .tpl-tags { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap }
 </style>

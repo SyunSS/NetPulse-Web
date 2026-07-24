@@ -122,7 +122,7 @@ onMounted(() => { fetchTasks() })
           <option value="completed">已完成</option><option value="failed">失败</option>
           <option value="running">运行中</option><option value="cancelled">已取消</option>
         </select>
-        <button class="btn" @click="fetchTasks">↻ 刷新</button>
+        <button class="btn" @click="fetchTasks">刷新</button>
         <button v-if="selectedIds.size > 0" class="btn danger" @click="handleBatchDelete">
           删除选中 ({{ selectedIds.size }})
         </button>
@@ -170,9 +170,9 @@ onMounted(() => { fetchTasks() })
 .action-col .link { margin-right: 8px; }
 .link { background: none; border: none; color: var(--color-primary); cursor: pointer; font-size: 13px; padding: 0; }
 .link.danger { color: var(--color-danger); }
-.tag-completed { color: #16a34a; background: #dcfce7; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
-.tag-failed { color: #dc2626; background: #fee2e2; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
-.tag-running { color: #2563eb; background: #dbeafe; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
-.tag-pending, .tag-cancelled { color: #6b7280; background: #f3f4f6; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+.tag-completed { color: var(--color-success); background: rgba(26,174,57,0.12); padding: 2px 8px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 600; letter-spacing: 0.125px; }
+.tag-failed { color: var(--color-danger); background: rgba(208,48,80,0.12); padding: 2px 8px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 600; letter-spacing: 0.125px; }
+.tag-running { color: var(--color-primary-text); background: var(--color-primary-bg); padding: 2px 8px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 600; letter-spacing: 0.125px; }
+.tag-pending, .tag-cancelled { color: var(--text-tertiary); background: rgba(163,158,152,0.15); padding: 2px 8px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 600; letter-spacing: 0.125px; }
 .empty-text { text-align: center; padding: 40px; color: var(--text-tertiary); }
 </style>

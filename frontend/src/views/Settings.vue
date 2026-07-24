@@ -70,7 +70,7 @@ onMounted(() => {
 <template>
   <div class="settings-page">
     <div class="settings-section">
-      <h2 class="section-title">👤 个人信息</h2>
+      <h2 class="section-title">个人信息</h2>
       <div class="info-grid">
         <div class="info-item">
           <span class="info-label">用户名</span>
@@ -86,7 +86,7 @@ onMounted(() => {
     </div>
 
     <div class="settings-section">
-      <h2 class="section-title">🎨 外观</h2>
+      <h2 class="section-title">外观</h2>
       <div class="setting-row">
         <div>
           <div class="setting-label">深色模式</div>
@@ -101,8 +101,8 @@ onMounted(() => {
 
     <div v-if="isAdmin" class="settings-section">
       <div class="section-header">
-        <h2 class="section-title">👥 用户管理</h2>
-        <button class="refresh-btn" :disabled="loading" @click="fetchUsers">↻ 刷新</button>
+        <h2 class="section-title">用户管理</h2>
+        <button class="refresh-btn" :disabled="loading" @click="fetchUsers">刷新</button>
       </div>
       <div v-if="loading" class="loading-text">加载中...</div>
       <div v-else-if="users.length === 0" class="empty-text">暂无用户</div>
@@ -124,14 +124,16 @@ onMounted(() => {
               <option value="user">普通用户</option>
               <option value="admin">管理员</option>
             </select>
-            <button class="delete-btn" @click="deleteUser(u.id, u.username)" title="删除用户">🗑</button>
+            <button class="delete-btn" @click="deleteUser(u.id, u.username)" title="删除用户">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 4h10M5 4V2.5A.5.5 0 0 1 5.5 2h3a.5.5 0 0 1 .5.5V4m1 0v7.5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
           </div>
         </div>
       </div>
     </div>
 
     <div class="settings-section">
-      <h2 class="section-title">🔐 账户</h2>
+      <h2 class="section-title">账户</h2>
       <button class="danger-btn" @click="authStore.logout(); router.push('/login')">
         退出登录
       </button>
@@ -166,7 +168,7 @@ onMounted(() => {
 .user-list { display: flex; flex-direction: column; gap: 8px; }
 .user-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--bg-body); border-radius: var(--radius-md); }
 .user-info { display: flex; align-items: center; gap: 10px; }
-.user-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--gradient-primary); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; }
+.user-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--color-primary); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; }
 .user-name { font-size: 13px; font-weight: 500; }
 .user-role-text { font-size: 11px; color: var(--text-tertiary); }
 .role-select { height: 32px; padding: 0 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-card); color: var(--text-primary); font-size: 13px; cursor: pointer; }
@@ -174,10 +176,10 @@ onMounted(() => {
 .delete-btn {
   width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
   border: 1px solid transparent; background: transparent; border-radius: var(--radius-sm);
-  cursor: pointer; font-size: 14px; transition: all var(--transition-fast);
+  cursor: pointer; transition: all var(--transition-fast);
 }
-.delete-btn:hover { background: rgba(208,48,80,0.1); border-color: var(--color-danger); color: var(--color-danger); }
-.danger-btn { height: 36px; padding: 0 16px; border: 1px solid var(--color-danger); background: var(--bg-card); color: var(--color-danger); border-radius: var(--radius-md); cursor: pointer; font-size: 13px; }
+.delete-btn:hover { background: rgba(208,48,80,0.1); color: var(--color-danger); }
+.danger-btn { height: 36px; padding: 0 16px; border: 1px solid var(--color-danger); background: var(--bg-card); color: var(--color-danger); border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
 .danger-btn:hover { background: var(--color-danger); color: white; }
 .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
 .switch input { opacity: 0; width: 0; height: 0; }

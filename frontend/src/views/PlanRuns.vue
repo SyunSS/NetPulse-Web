@@ -165,8 +165,8 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
         <p class="page-subtitle" v-if="planStore.currentPlan">计划: <strong>{{ planStore.currentPlan.name }}</strong></p>
       </div>
       <div class="header-actions">
-        <button class="btn primary" @click="router.push(`/plans/${planId}/edit`)">✎ 编辑</button>
-        <button class="btn" @click="fetchRuns">↻ 刷新</button>
+        <button class="btn primary" @click="router.push(`/plans/${planId}/edit`)">编辑</button>
+        <button class="btn" @click="fetchRuns">刷新</button>
       </div>
     </div>
 
@@ -184,21 +184,23 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
         <option value="cancelled">已取消</option>
         <option value="running">运行中</option>
       </select>
-      <button class="btn sm" @click="fetchRuns">🔍 搜索</button>
-      <button class="btn sm ghost" @click="resetSearch">↺ 重置</button>
+      <button class="btn sm" @click="fetchRuns">搜索</button>
+      <button class="btn sm ghost" @click="resetSearch">重置</button>
       <span class="spacer"></span>
       <label class="auto-refresh">
         <input type="checkbox" v-model="autoRefresh" /> 自动刷新
       </label>
-      <button class="btn sm danger" @click="handleBatchDelete">🗑 批量删除</button>
+      <button class="btn sm danger" @click="handleBatchDelete">批量删除</button>
     </div>
 
     <div v-if="planStore.planRuns.length === 0" class="empty-state">
-      <div class="empty-icon">🕘</div><h3>暂无运行历史</h3><p>运行计划后会在此显示结果</p>
+      <div class="empty-icon">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      </div><h3>暂无运行历史</h3><p>运行计划后会在此显示结果</p>
     </div>
 
     <div v-else class="runs-list">
-      <div v-for="run in filteredRuns()" :key="run.id" class="run-card lift">
+      <div v-for="run in filteredRuns()" :key="run.id" class="run-card">
         <div class="run-header">
           <div class="run-meta">
             <span class="trigger-tag" :style="{ background: triggerColor(run.triggered_by) + '20', color: triggerColor(run.triggered_by) }">
@@ -209,8 +211,12 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
           <div class="run-status-row">
             <span class="status-tag" :class="`status-${run.status}`">{{ statusText(run.status) }}</span>
             <span class="task-progress" v-if="run.task_count > 0">({{ run.completed_count }}/{{ run.task_count }})</span>
-            <button v-if="run.status !== 'running'" class="btn-icon danger" @click="handleDelete(run.id)" title="删除">🗑</button>
-            <button v-if="run.status === 'running'" class="btn-icon danger" @click="handleDelete(run.id, true)" title="强制停止并删除">⛔</button>
+            <button v-if="run.status !== 'running'" class="btn-icon danger" @click="handleDelete(run.id)" title="删除">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 4h10M5 4V2.5A.5.5 0 0 1 5.5 2h3a.5.5 0 0 1 .5.5V4m1 0v7.5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button v-if="run.status === 'running'" class="btn-icon danger" @click="handleDelete(run.id, true)" title="强制停止并删除">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="3" y="3" width="8" height="8" rx="1" fill="currentColor"/></svg>
+            </button>
           </div>
         </div>
 
@@ -232,15 +238,15 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
             <span v-if="taskMeta[tid]" class="task-status-mini" :class="`mini-${taskMeta[tid].status}`">
               {{ taskMeta[tid].status }}
             </span>
-            <button class="btn sm" @click="router.push(`/task/${tid}`)">📊 详情</button>
+            <button class="btn sm" @click="router.push(`/task/${tid}`)">详情</button>
           </div>
         </div>
 
         <div class="run-export" v-if="run.status === 'completed'">
           <span class="export-label">导出整次结果:</span>
-          <button class="btn sm primary" @click="exportRun(run.id, 'xlsx')">📥 Excel</button>
-          <button class="btn sm" @click="exportRun(run.id, 'csv')">📥 CSV</button>
-          <button class="btn sm" @click="exportRun(run.id, 'json')">📥 JSON</button>
+          <button class="btn sm primary" @click="exportRun(run.id, 'xlsx')">Excel</button>
+          <button class="btn sm" @click="exportRun(run.id, 'csv')">CSV</button>
+          <button class="btn sm" @click="exportRun(run.id, 'json')">JSON</button>
         </div>
       </div>
     </div>
@@ -258,8 +264,8 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
 .back-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .btn { height: 32px; padding: 0 14px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); border-radius: var(--radius-sm); font-size: 13px; cursor: pointer; font-weight: 500; }
 .btn:hover { background: var(--bg-hover); border-color: var(--border-color-hover); }
-.btn.primary { background: var(--gradient-primary); color: white; border: none; }
-.btn.primary:hover { box-shadow: var(--shadow-glow); }
+.btn.primary { background: var(--color-primary); color: white; border: none; }
+.btn.primary:hover { background: var(--color-primary-active); }
 .btn.danger { color: var(--color-danger); border-color: var(--color-danger); }
 .btn.danger:hover { background: var(--color-danger); color: white; }
 .btn.ghost { background: transparent; }
@@ -276,8 +282,8 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
 .auto-refresh input { margin: 0; }
 
 .empty-state { text-align: center; padding: 80px 20px; color: var(--text-secondary); }
-.empty-icon { font-size: 64px; margin-bottom: 16px; opacity: 0.5; }
-.empty-state h3 { font-size: 18px; color: var(--text-primary); margin-bottom: 8px; }
+.empty-icon { color: var(--text-tertiary); margin-bottom: 12px; }
+.empty-state h3 { font-size: 16px; color: var(--text-primary); margin-bottom: 4px; }
 
 .runs-list { display: flex; flex-direction: column; gap: 12px; }
 .run-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
@@ -285,7 +291,7 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
 .run-meta { display: flex; align-items: center; gap: 10px; }
 .run-status-row { display: flex; align-items: center; gap: 6px; }
 .task-progress { font-size: 12px; color: var(--text-tertiary); }
-.trigger-tag { padding: 2px 8px; font-size: 11px; font-weight: 500; border-radius: 4px; }
+.trigger-tag { padding: 2px 8px; font-size: 11px; font-weight: 500; border-radius: var(--radius-sm); }
 .run-time { font-size: 13px; color: var(--text-secondary); font-family: var(--font-mono); }
 .run-body { display: flex; gap: 24px; padding-top: 8px; border-top: 1px solid var(--border-color); }
 .run-detail { display: flex; align-items: center; gap: 6px; font-size: 13px; }
@@ -294,19 +300,19 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
 .task-links { padding-top: 8px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 6px; }
 .task-links-title { font-size: 12px; color: var(--text-tertiary); font-weight: 500; }
 .task-link-row { display: flex; align-items: center; gap: 8px; }
-.task-type-badge { padding: 2px 8px; font-size: 11px; font-weight: 500; border-radius: 4px; }
-.task-id { font-size: 11px; color: var(--color-primary); background: rgba(32,128,240,0.08); padding: 3px 8px; border-radius: 4px; cursor: pointer; font-family: var(--font-mono); }
-.task-id:hover { background: rgba(32,128,240,0.15); }
-.task-status-mini { font-size: 11px; padding: 2px 6px; border-radius: 4px; }
-.mini-completed { background: rgba(24,160,88,.15); color: var(--color-success); }
-.mini-failed { background: rgba(208,48,80,.15); color: var(--color-danger); }
-.mini-running, .mini-pending { background: rgba(32,128,240,.15); color: var(--color-primary); }
+.task-type-badge { padding: 2px 8px; font-size: 11px; font-weight: 500; border-radius: var(--radius-sm); }
+.task-id { font-size: 11px; color: var(--color-primary); background: var(--color-primary-bg); padding: 3px 8px; border-radius: var(--radius-sm); cursor: pointer; font-family: var(--font-mono); }
+.task-id:hover { background: var(--color-primary-bg); }
+.task-status-mini { font-size: 11px; padding: 2px 6px; border-radius: var(--radius-sm); }
+.mini-completed { background: rgba(26,174,57,0.12); color: var(--color-success); }
+.mini-failed { background: rgba(208,48,80,0.12); color: var(--color-danger); }
+.mini-running, .mini-pending { background: var(--color-primary-bg); color: var(--color-primary-text); }
 .run-export { display: flex; align-items: center; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border-color); }
 .export-label { font-size: 12px; color: var(--text-tertiary); margin-right: 4px; }
 
-.status-tag { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
-.status-completed { background: rgba(24,160,88,.15); color: var(--color-success); }
-.status-running { background: rgba(32,128,240,.15); color: var(--color-primary); }
-.status-pending, .status-cancelled { background: rgba(156,163,175,.15); color: var(--text-secondary); }
-.status-failed { background: rgba(208,48,80,.15); color: var(--color-danger); }
+.status-tag { padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; letter-spacing: 0.125px; }
+.status-completed { background: rgba(26,174,57,0.12); color: var(--color-success); }
+.status-running { background: var(--color-primary-bg); color: var(--color-primary-text); }
+.status-pending, .status-cancelled { background: rgba(163,158,152,0.15); color: var(--text-tertiary); }
+.status-failed { background: rgba(208,48,80,0.12); color: var(--color-danger); }
 </style>

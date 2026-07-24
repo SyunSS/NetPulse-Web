@@ -109,30 +109,29 @@ async function handleSubmit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--n-color-body);
+  background: var(--bg-alt);
 }
 .login-card {
   width: 420px;
   padding: 40px;
-  border-radius: 12px;
-  background: var(--n-color-card);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-card);
 }
 .login-header {
   text-align: center;
   margin-bottom: 32px;
 }
 .logo-text {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
-  background: linear-gradient(135deg, #2080f0 0%, #18a058 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
 }
 .subtitle {
   margin-top: 8px;
-  color: var(--n-text-color-3);
+  color: var(--text-secondary);
   font-size: 14px;
 }
 .form-group {
@@ -142,23 +141,24 @@ async function handleSubmit() {
   display: block;
   margin-bottom: 6px;
   font-size: 14px;
-  color: var(--n-text-color-2);
+  color: var(--text-secondary);
 }
 .form-input {
   width: 100%;
   height: 40px;
   padding: 0 12px;
   font-size: 14px;
-  border: 1px solid var(--n-border-color);
-  border-radius: 4px;
-  background: var(--n-color-input);
-  color: var(--n-text-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
   transition: border-color 0.2s;
   box-sizing: border-box;
 }
 .form-input:focus {
   outline: none;
-  border-color: #2080f0;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-bg);
 }
 .form-input:disabled {
   opacity: 0.6;
@@ -169,16 +169,16 @@ async function handleSubmit() {
   height: 40px;
   margin-top: 8px;
   border: none;
-  border-radius: 4px;
-  background: #2080f0;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
   color: white;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  transition: opacity 0.2s;
+  transition: background 0.2s;
 }
 .submit-btn:hover:not(:disabled) {
-  opacity: 0.9;
+  background: var(--color-primary-active);
 }
 .submit-btn:disabled {
   opacity: 0.6;
@@ -191,7 +191,7 @@ async function handleSubmit() {
 .link-btn {
   background: none;
   border: none;
-  color: #2080f0;
+  color: var(--color-primary);
   cursor: pointer;
   font-size: 14px;
   padding: 4px 8px;

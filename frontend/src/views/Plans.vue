@@ -87,7 +87,7 @@ onMounted(async () => {
     <!-- 工具栏 -->
     <div class="toolbar">
       <div class="search-box">
-        <span class="search-icon">🔍</span>
+        <svg class="search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M9.5 9.5L13 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <input
           v-model="searchText"
           type="text"
@@ -102,13 +102,15 @@ onMounted(async () => {
 
     <!-- 加载状态 -->
     <div v-if="planStore.loading && planStore.plans.length === 0" class="empty-state">
-      <div class="empty-icon">⏳</div>
+      <div class="empty-spinner"></div>
       <p>加载中...</p>
     </div>
 
     <!-- 空状态 -->
     <div v-else-if="planStore.plans.length === 0" class="empty-state">
-      <div class="empty-icon">📋</div>
+      <div class="empty-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      </div>
       <h3>还没有计划</h3>
       <p>创建你的第一个测试计划，可手动或定时运行</p>
       <button class="primary-btn" @click="router.push('/plans/new')">＋ 新建计划</button>
@@ -119,7 +121,7 @@ onMounted(async () => {
       <div
         v-for="plan in filteredPlans()"
         :key="plan.id"
-        class="plan-card lift"
+        class="plan-card"
       >
         <!-- 卡片头 -->
         <div class="plan-card-header">
@@ -142,7 +144,7 @@ onMounted(async () => {
 
         <!-- 调度信息 -->
         <div class="plan-schedule" v-if="plan.cron_expression">
-          <div class="schedule-icon">⏰</div>
+          <div class="schedule-dot" style="background: var(--color-primary)"></div>
           <div class="schedule-info">
             <div class="schedule-cron">{{ plan.cron_expression }}</div>
             <div class="schedule-next" v-if="plan.next_run_at">
@@ -151,7 +153,7 @@ onMounted(async () => {
           </div>
         </div>
         <div v-else class="plan-schedule manual">
-          <div class="schedule-icon">👆</div>
+          <div class="schedule-dot"></div>
           <div class="schedule-info">
             <div class="schedule-cron">仅手动运行</div>
             <div class="schedule-next" v-if="plan.last_run_at">
@@ -163,16 +165,16 @@ onMounted(async () => {
         <!-- 操作按钮 -->
         <div class="plan-actions">
           <button class="action-btn primary" @click="handleRun(plan.id, plan.name)">
-            ▶ 立即运行
+            立即运行
           </button>
           <button class="action-btn" @click="router.push(`/plans/${plan.id}/edit`)">
-            ✎ 编辑
+            编辑
           </button>
           <button class="action-btn" @click="router.push(`/plans/${plan.id}/runs`)">
-            🕘 历史
+            历史
           </button>
-          <button class="action-btn danger" @click="handleDelete(plan.id, plan.name)">
-            🗑
+          <button class="action-btn danger" @click="handleDelete(plan.id, plan.name)" title="删除">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 4h10M5 4V2.5A.5.5 0 0 1 5.5 2h3a.5.5 0 0 1 .5.5V4m1 0v7.5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         </div>
       </div>
@@ -200,19 +202,18 @@ onMounted(async () => {
 
 .search-icon {
   position: absolute;
-  left: 14px;
+  left: 12px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-tertiary);
-  font-size: 14px;
 }
 
 .search-input {
   width: 100%;
-  height: 40px;
-  padding: 0 14px 0 40px;
+  height: 36px;
+  padding: 0 12px 0 34px;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--bg-card);
   color: var(--text-primary);
   font-size: 14px;
@@ -222,26 +223,24 @@ onMounted(async () => {
 .search-input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(32, 128, 240, 0.1);
+  box-shadow: 0 0 0 2px var(--color-primary-bg);
 }
 
 .primary-btn {
-  height: 40px;
-  padding: 0 20px;
+  height: 36px;
+  padding: 0 16px;
   border: none;
-  background: var(--gradient-primary);
+  background: var(--color-primary);
   color: white;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-fast);
-  box-shadow: var(--shadow-md);
 }
 
 .primary-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-glow);
+  background: var(--color-primary-active);
 }
 
 .plan-grid {
@@ -319,18 +318,20 @@ onMounted(async () => {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  background: rgba(32, 128, 240, 0.05);
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(32, 128, 240, 0.15);
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
 }
 
 .plan-schedule.manual {
-  background: rgba(156, 163, 175, 0.05);
-  border-color: rgba(156, 163, 175, 0.15);
+  background: var(--bg-hover);
 }
 
-.schedule-icon {
-  font-size: 18px;
+.schedule-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
 }
 
 .schedule-info {
@@ -408,19 +409,34 @@ onMounted(async () => {
 }
 
 .empty-icon {
-  font-size: 64px;
+  color: var(--text-tertiary);
   margin-bottom: 16px;
-  opacity: 0.5;
+}
+
+.empty-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin: 0 auto 16px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .empty-state h3 {
-  font-size: 18px;
+  font-size: 16px;
   color: var(--text-primary);
   margin-bottom: 8px;
+  font-weight: 600;
 }
 
 .empty-state p {
   font-size: 14px;
+  color: var(--text-secondary);
   margin-bottom: 20px;
 }
 </style>
