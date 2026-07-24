@@ -90,11 +90,10 @@ async function handleDelete(force?: boolean) {
 
 async function handleExport(format: string) {
   try {
-    const resp = await http.get(`/task/${taskId}/export`, {
+    const blob: Blob = await http.get(`/task/${taskId}/export`, {
       params: { format },
       responseType: 'blob',
     })
-    const blob = resp instanceof Blob ? resp : await resp.data
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
     const ext = format === 'xlsx' ? 'xlsx' : format === 'csv' ? 'csv' : 'json'

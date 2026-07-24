@@ -23,6 +23,10 @@ http.interceptors.request.use(
 http.interceptors.response.use(
   (response) => {
     const { data } = response
+    // blob 响应直接返回，不经过 JSON 检查
+    if (data instanceof Blob) {
+      return data
+    }
     if (data.code !== 0) {
       return Promise.reject(new Error(data.msg || '请求失败'))
     }

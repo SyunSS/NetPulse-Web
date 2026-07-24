@@ -34,8 +34,8 @@ async function fetchTaskMeta(ids: string[]) {
   for (const tid of ids) {
     if (taskMeta.value[tid]) continue
     try {
-      const data = await http.get(`/task/${tid}`)
-      taskMeta.value[tid] = { id: tid, type: data.task_type, status: data.status }
+      const res = await http.get(`/task/${tid}`)
+      taskMeta.value[tid] = { id: tid, type: res.data.task_type, status: res.data.status }
     } catch {}
   }
 }
@@ -124,11 +124,10 @@ async function handleBatchDelete() {
 
 async function exportRun(runId: string, format: 'xlsx' | 'csv' | 'json') {
   try {
-    const resp = await http.get(`/plan/${planId}/run/${runId}/export`, {
+    const blob: Blob = await http.get(`/plan/${planId}/run/${runId}/export`, {
       params: { format },
       responseType: 'blob',
     })
-    const blob = resp instanceof Blob ? resp : await resp.data
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
     a.download = `plan_run_${runId.substring(0, 8)}.${format === 'xlsx' ? 'xlsx' : format === 'csv' ? 'csv' : 'json'}`
