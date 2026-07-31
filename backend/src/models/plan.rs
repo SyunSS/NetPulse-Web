@@ -35,7 +35,7 @@ pub struct TaskPlanItem {
 pub struct TaskPlanRun {
     pub id: String,
     pub plan_id: String,
-    pub task_ids: String,       // JSON 数组: ["task1_id", "task2_id"]
+    pub task_ids: String, // JSON 数组: ["task1_id", "task2_id"]
     pub triggered_by: String,
     pub started_at: String,
     pub finished_at: Option<String>,
@@ -65,8 +65,12 @@ pub struct PlanItemInput {
     pub engine: String,
 }
 
-fn default_repeat() -> i32 { 1 }
-fn default_engine() -> String { "headless_chrome".to_string() }
+fn default_repeat() -> i32 {
+    1
+}
+fn default_engine() -> String {
+    "headless_chrome".to_string()
+}
 
 /// 创建计划请求
 #[derive(Debug, Clone, Serialize, Deserialize)]

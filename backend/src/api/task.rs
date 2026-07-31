@@ -6,7 +6,10 @@ use axum::Json;
 use axum::Router;
 use serde::{Deserialize, Serialize};
 
-use crate::models::task::{CreateTaskRequest, CreateTaskResponse, DownloadResult, PingResult, TestConfig, TestTask, VideoResult, WebsiteResult};
+use crate::models::task::{
+    CreateTaskRequest, CreateTaskResponse, DownloadResult, PingResult, TestTask, VideoResult,
+    WebsiteResult,
+};
 use crate::services::auth_service::Claims;
 use crate::services::task_service::TaskService;
 use crate::storage::StorageManager;
@@ -40,13 +43,23 @@ async fn create_task(
     if req.urls.is_empty() {
         return Err(AppError::bad_request("测试URL列表不能为空"));
     }
-    for url in &req.urls {
-        crate::utils::url::validate_url(url).map_err(|s| AppError::bad_request(&s))?;
-    }
 
-    let valid_types = ["website", "download", "video"];
+    let valid_types = ["website", "download", "video", "ping"];
     if !valid_types.contains(&req.task_type.as_str()) {
         return Err(AppError::bad_request("无效的任务类型"));
+    }
+
+    for url in &req.urls {
+        if req.task_type == "ping" {
+            crate::utils::url::validate_ping_target(url).map_err(|s| AppError::bad_request(&s))?;
+        } else {
+            crate::utils::url::validate_url(url).map_err(|s| AppError::bad_request(&s))?;
+        }
+    }
+    if let Some(repeat_count) = req.options.get("repeat_count").and_then(|v| v.as_u64()) {
+        if !(1..=100).contains(&repeat_count) {
+            return Err(AppError::bad_request("重复次数必须在1到100之间"));
+        }
     }
 
     let resp = TaskService::create_task(&state.db, &state.task_tx, &claims.sub, &req)
@@ -122,7 +135,11 @@ async fn get_task_results(
     Ok(Json(ok(results)))
 }
 
-async fn check_task_owner(state: &AppState, claims: &Claims, task_id: &str) -> Result<TestTask, AppError> {
+async fn check_task_owner(
+    state: &AppState,
+    claims: &Claims,
+    task_id: &str,
+) -> Result<TestTask, AppError> {
     let task = TaskService::get_task(&state.db, task_id)
         .await
         .map_err(|e| AppError::not_found(&e.to_string()))?;
@@ -178,9 +195,12 @@ async fn cancel_task(
     Path(task_id): Path<String>,
 ) -> Result<Json<crate::utils::response::ApiResponse<()>>, AppError> {
     let _task = check_task_owner(&state, &claims, &task_id).await?;
-    TaskService::cancel_task(&state.db, &state.cancel_tx, &task_id)
+    let changed = TaskService::cancel_task(&state.db, &state.cancel_tx, &task_id)
         .await
         .map_err(|e| AppError::internal(&e.to_string()))?;
+    if !changed {
+        return Err(AppError::bad_request("任务当前不可取消"));
+    }
     Ok(Json(ok_with_msg("任务已取消", ())))
 }
 
@@ -225,36 +245,56 @@ async fn export_result(
     if query.format == "xlsx" {
         return match task.task_type.as_str() {
             "website" => {
-                let data = TaskService::get_task_results(&state.db, &task_id).await
+                let data = TaskService::get_task_results(&state.db, &task_id)
+                    .await
                     .map_err(|e| AppError::internal(&e.to_string()))?;
                 let path = crate::report::excel::export_website_xlsx(&data, &task_id, dir)
                     .map_err(|e| AppError::internal(&e.to_string()))?;
                 let bytes = std::fs::read(&path).map_err(|e| AppError::internal(&e.to_string()))?;
-                Ok(file_response(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", &format!("website_{}.xlsx", task_id)))
+                Ok(file_response(
+                    bytes,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    &format!("website_{}.xlsx", task_id),
+                ))
             }
             "video" => {
-                let data = TaskService::get_video_results(&state.db, &task_id).await
+                let data = TaskService::get_video_results(&state.db, &task_id)
+                    .await
                     .map_err(|e| AppError::internal(&e.to_string()))?;
                 let path = crate::report::excel::export_video_xlsx(&data, &task_id, dir)
                     .map_err(|e| AppError::internal(&e.to_string()))?;
                 let bytes = std::fs::read(&path).map_err(|e| AppError::internal(&e.to_string()))?;
-                Ok(file_response(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", &format!("video_{}.xlsx", task_id)))
+                Ok(file_response(
+                    bytes,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    &format!("video_{}.xlsx", task_id),
+                ))
             }
             "download" => {
-                let data = TaskService::get_download_results(&state.db, &task_id).await
+                let data = TaskService::get_download_results(&state.db, &task_id)
+                    .await
                     .map_err(|e| AppError::internal(&e.to_string()))?;
                 let path = crate::report::excel::export_download_xlsx(&data, &task_id, dir)
                     .map_err(|e| AppError::internal(&e.to_string()))?;
                 let bytes = std::fs::read(&path).map_err(|e| AppError::internal(&e.to_string()))?;
-                Ok(file_response(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", &format!("download_{}.xlsx", task_id)))
+                Ok(file_response(
+                    bytes,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    &format!("download_{}.xlsx", task_id),
+                ))
             }
             "ping" => {
-                let data = TaskService::get_ping_results(&state.db, &task_id).await
+                let data = TaskService::get_ping_results(&state.db, &task_id)
+                    .await
                     .map_err(|e| AppError::internal(&e.to_string()))?;
                 let path = crate::report::excel::export_ping_xlsx(&data, &task_id, dir)
                     .map_err(|e| AppError::internal(&e.to_string()))?;
                 let bytes = std::fs::read(&path).map_err(|e| AppError::internal(&e.to_string()))?;
-                Ok(file_response(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", &format!("ping_{}.xlsx", task_id)))
+                Ok(file_response(
+                    bytes,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    &format!("ping_{}.xlsx", task_id),
+                ))
             }
             _ => Err(AppError::bad_request("不支持的任务类型")),
         };
@@ -300,16 +340,27 @@ fn export_typed<T: Serialize>(
         "csv" => {
             let mut wtr = csv::Writer::from_writer(Vec::new());
             for row in data {
-                wtr.serialize(row).map_err(|e| AppError::internal(&e.to_string()))?;
+                wtr.serialize(row)
+                    .map_err(|e| AppError::internal(&e.to_string()))?;
             }
-            let bytes = wtr.into_inner().map_err(|e| AppError::internal(&e.to_string()))?;
-            Ok(file_response(bytes, "text/csv", &format!("{}_{}.csv", prefix, task_id)))
+            let bytes = wtr
+                .into_inner()
+                .map_err(|e| AppError::internal(&e.to_string()))?;
+            Ok(file_response(
+                bytes,
+                "text/csv",
+                &format!("{}_{}.csv", prefix, task_id),
+            ))
         }
         _ => {
             // json 作为默认（也支持 xlsx 但需要具体类型）
-            let bytes = serde_json::to_vec_pretty(data)
-                .map_err(|e| AppError::internal(&e.to_string()))?;
-            Ok(file_response(bytes, "application/json", &format!("{}_{}.json", prefix, task_id)))
+            let bytes =
+                serde_json::to_vec_pretty(data).map_err(|e| AppError::internal(&e.to_string()))?;
+            Ok(file_response(
+                bytes,
+                "application/json",
+                &format!("{}_{}.json", prefix, task_id),
+            ))
         }
     }
 }
@@ -317,10 +368,17 @@ fn export_typed<T: Serialize>(
 // ─── 批量导入 ────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
-struct ImportRequest { tasks: Vec<serde_json::Value> }
+struct ImportRequest {
+    tasks: Vec<serde_json::Value>,
+}
 
 #[derive(Debug, Serialize)]
-struct ImportResponse { created: usize, failed: usize, task_ids: Vec<String>, message: String }
+struct ImportResponse {
+    created: usize,
+    failed: usize,
+    task_ids: Vec<String>,
+    message: String,
+}
 
 async fn import_tasks(
     State(state): State<AppState>,
@@ -328,29 +386,70 @@ async fn import_tasks(
     Json(body): Json<ImportRequest>,
 ) -> Result<Json<crate::utils::response::ApiResponse<ImportResponse>>, AppError> {
     let valid = ["ping", "website", "download", "video"];
-    if body.tasks.is_empty() { return Err(AppError::bad_request("任务列表不能为空")); }
+    if body.tasks.is_empty() {
+        return Err(AppError::bad_request("任务列表不能为空"));
+    }
 
-    let mut created = 0; let mut failed = 0; let mut ids = Vec::new();
+    let mut created = 0;
+    let mut failed = 0;
+    let mut ids = Vec::new();
 
     for item in &body.tasks {
-        let tt = item.get("task_type").and_then(|v| v.as_str()).unwrap_or("website")
-            .trim().trim_matches(|c: char| c == '[' || c == ']' || c.is_whitespace()).to_lowercase();
-        if !valid.contains(&tt.as_str()) { failed += 1; continue; }
+        let tt = item
+            .get("task_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("website")
+            .trim()
+            .trim_matches(|c: char| c == '[' || c == ']' || c.is_whitespace())
+            .to_lowercase();
+        if !valid.contains(&tt.as_str()) {
+            failed += 1;
+            continue;
+        }
 
-        let urls: Vec<String> = item.get("urls").and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|u| u.as_str().map(String::from)).collect())
+        let urls: Vec<String> = item
+            .get("urls")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|u| u.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
-        if urls.is_empty() { failed += 1; continue; }
+        if urls.is_empty() {
+            failed += 1;
+            continue;
+        }
         // 验证 URL 安全
-        let has_invalid = urls.iter().any(|u| crate::utils::url::validate_url(u).is_err());
-        if has_invalid { failed += 1; continue; }
+        let has_invalid = urls.iter().any(|u| {
+            if tt == "ping" {
+                crate::utils::url::validate_ping_target(u).is_err()
+            } else {
+                crate::utils::url::validate_url(u).is_err()
+            }
+        });
+        if has_invalid {
+            failed += 1;
+            continue;
+        }
 
-        let rc = item.get("options").and_then(|o| o.get("repeat_count"))
-            .and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+        let rc = item
+            .get("options")
+            .and_then(|o| o.get("repeat_count"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1);
+        if !(1..=100).contains(&rc) {
+            failed += 1;
+            continue;
+        }
+        let options = item
+            .get("options")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
 
         let tid = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
-        let cfg = serde_json::json!({ "urls": &urls, "options": { "repeat_count": rc } });
+        let cfg = serde_json::json!({ "urls": &urls, "options": &options });
 
         if sqlx::query("INSERT INTO test_task (id, user_id, task_type, status, config, progress, created_at) VALUES (?,?,?,'pending',?,0,?)")
             .bind(&tid).bind(&claims.sub).bind(&tt).bind(&cfg.to_string()).bind(&now)
@@ -359,24 +458,61 @@ async fn import_tasks(
         ids.push(tid.clone());
         created += 1;
 
-        let _ = state.task_tx.send(crate::utils::response::TaskJob {
-            task_id: tid, user_id: claims.sub.clone(), task_type: tt,
-            urls, options: serde_json::json!({ "repeat_count": rc }),
-        }).await;
+        if state
+            .task_tx
+            .send(crate::utils::response::TaskJob {
+                task_id: tid.clone(),
+                user_id: claims.sub.clone(),
+                task_type: tt,
+                urls,
+                options,
+            })
+            .await
+            .is_err()
+        {
+            let _ = sqlx::query("UPDATE test_task SET status = 'failed', finished_at = ?, error_msg = ? WHERE id = ? AND status = 'pending'")
+                .bind(chrono::Utc::now().to_rfc3339())
+                .bind("任务派发失败")
+                .bind(&tid)
+                .execute(&state.db)
+                .await;
+            failed += 1;
+            created -= 1;
+            ids.pop();
+        }
     }
 
-    Ok(Json(ok(ImportResponse { created, failed, task_ids: ids,
-        message: format!("导入完成: {} 成功, {} 失败", created, failed) })))
+    Ok(Json(ok(ImportResponse {
+        created,
+        failed,
+        task_ids: ids,
+        message: format!("导入完成: {} 成功, {} 失败", created, failed),
+    })))
 }
 
 // ─── 模板下载 ────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
-struct Tmpl { version: String, description: String, supported_types: Vec<String>, examples: Vec<TmplEx>, batch_import_format: TmplFmt }
+struct Tmpl {
+    version: String,
+    description: String,
+    supported_types: Vec<String>,
+    examples: Vec<TmplEx>,
+    batch_import_format: TmplFmt,
+}
 #[derive(Debug, Serialize)]
-struct TmplEx { name: String, task_type: String, urls: Vec<String>, #[serde(skip_serializing_if="Option::is_none")] options: Option<serde_json::Value> }
+struct TmplEx {
+    name: String,
+    task_type: String,
+    urls: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    options: Option<serde_json::Value>,
+}
 #[derive(Debug, Serialize)]
-struct TmplFmt { description: String, json_body: serde_json::Value }
+struct TmplFmt {
+    description: String,
+    json_body: serde_json::Value,
+}
 
 async fn download_template() -> Result<Json<crate::utils::response::ApiResponse<Tmpl>>, AppError> {
     Ok(Json(ok(Tmpl {
@@ -389,18 +525,30 @@ async fn download_template() -> Result<Json<crate::utils::response::ApiResponse<
             "video   — 视频播放测速".into(),
         ],
         examples: vec![
-            TmplEx { name: "Ping".into(), task_type: "ping".into(),
+            TmplEx {
+                name: "Ping".into(),
+                task_type: "ping".into(),
                 urls: vec!["https://www.baidu.com".into(), "1.1.1.1:443".into()],
-                options: Some(serde_json::json!({"repeat_count":3,"_comment":">1 取平均值"})) },
-            TmplEx { name: "网站".into(), task_type: "website".into(),
+                options: Some(serde_json::json!({"repeat_count":3,"_comment":">1 取平均值"})),
+            },
+            TmplEx {
+                name: "网站".into(),
+                task_type: "website".into(),
                 urls: vec!["https://www.baidu.com".into()],
-                options: Some(serde_json::json!({"repeat_count":2})) },
-            TmplEx { name: "下载".into(), task_type: "download".into(),
+                options: Some(serde_json::json!({"repeat_count":2})),
+            },
+            TmplEx {
+                name: "下载".into(),
+                task_type: "download".into(),
                 urls: vec!["http://speedtest.tele2.net/1MB.zip".into()],
-                options: Some(serde_json::json!({"repeat_count":2})) },
-            TmplEx { name: "视频".into(), task_type: "video".into(),
+                options: Some(serde_json::json!({"repeat_count":2})),
+            },
+            TmplEx {
+                name: "视频".into(),
+                task_type: "video".into(),
                 urls: vec!["https://www.bilibili.com/video/BV1GJ411x7h7".into()],
-                options: Some(serde_json::json!({"repeat_count":1})) },
+                options: Some(serde_json::json!({"repeat_count":1})),
+            },
         ],
         batch_import_format: TmplFmt {
             description: "POST /api/task/import 格式".into(),
@@ -421,22 +569,37 @@ async fn get_task_logs(
     let _task = check_task_owner(&state, &claims, &task_id).await?;
     use crate::models::task::TaskLog;
     let logs = sqlx::query_as::<_, TaskLog>(
-        "SELECT * FROM task_log WHERE task_id = ? ORDER BY created_at ASC"
-    ).bind(&task_id).fetch_all(&state.db).await
-        .map_err(|e| AppError::internal(&e.to_string()))?;
-    let entries: Vec<TaskLogEntry> = logs.iter().map(|l| TaskLogEntry {
-        level: l.level.clone(), message: l.message.clone(), created_at: l.created_at.clone(),
-    }).collect();
+        "SELECT * FROM task_log WHERE task_id = ? ORDER BY created_at ASC",
+    )
+    .bind(&task_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| AppError::internal(&e.to_string()))?;
+    let entries: Vec<TaskLogEntry> = logs
+        .iter()
+        .map(|l| TaskLogEntry {
+            level: l.level.clone(),
+            message: l.message.clone(),
+            created_at: l.created_at.clone(),
+        })
+        .collect();
     Ok(Json(ok(entries)))
 }
 
 #[derive(Debug, Serialize)]
-struct TaskLogEntry { level: String, message: String, created_at: String }
+struct TaskLogEntry {
+    level: String,
+    message: String,
+    created_at: String,
+}
 
 fn file_response(bytes: Vec<u8>, content_type: &str, filename: &str) -> Response {
     Response::builder()
         .header(header::CONTENT_TYPE, content_type)
-        .header(header::CONTENT_DISPOSITION, format!("attachment; filename={}", filename))
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename={}", filename),
+        )
         .body(axum::body::Body::from(bytes))
         .unwrap()
 }
@@ -446,36 +609,66 @@ async fn delete_task(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Path(task_id): Path<String>,
-    Query(params): Query<std::collections::HashMap<String, String>>,
+    Query(_params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<crate::utils::response::ApiResponse<()>>, AppError> {
-    let force = params.get("force").map(|s| s.as_str()) == Some("true");
-    let task = TaskService::get_task(&state.db, &task_id).await
+    let task = TaskService::get_task(&state.db, &task_id)
+        .await
         .map_err(|_| AppError::not_found("任务不存在"))?;
     if task.user_id != claims.sub {
         return Err(AppError::unauthorized("无权删除"));
     }
-    if !force && (task.status == "pending" || task.status == "running") {
-        return Err(AppError::bad_request("请先取消运行中的任务再删除"));
+    if task.status == "pending" || task.status == "running" {
+        let cancelled = TaskService::cancel_task(&state.db, &state.cancel_tx, &task_id)
+            .await
+            .map_err(|e| AppError::internal(&e.to_string()))?;
+        if !cancelled {
+            return Err(AppError::bad_request("任务状态已变化，请重试删除"));
+        }
+        return Err(AppError::bad_request("任务已取消，请稍后再删除"));
     }
-    delete_task_data(&state.db, &task_id).await
+    delete_task_data(&state.db, &task_id)
+        .await
         .map_err(|e| AppError::internal(&e.to_string()))?;
     Ok(Json(ok_with_msg("任务已删除", ())))
 }
 
 async fn delete_task_data(db: &sqlx::SqlitePool, task_id: &str) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM website_result WHERE task_id = ?").bind(task_id).execute(db).await?;
-    sqlx::query("DELETE FROM video_result WHERE task_id = ?").bind(task_id).execute(db).await?;
-    sqlx::query("DELETE FROM download_result WHERE task_id = ?").bind(task_id).execute(db).await?;
-    sqlx::query("DELETE FROM ping_result WHERE task_id = ?").bind(task_id).execute(db).await?;
-    sqlx::query("DELETE FROM task_log WHERE task_id = ?").bind(task_id).execute(db).await?;
-    sqlx::query("DELETE FROM task_metric_config WHERE task_id = ?").bind(task_id).execute(db).await?;
-    sqlx::query("DELETE FROM test_task WHERE id = ?").bind(task_id).execute(db).await?;
+    sqlx::query("DELETE FROM website_result WHERE task_id = ?")
+        .bind(task_id)
+        .execute(db)
+        .await?;
+    sqlx::query("DELETE FROM video_result WHERE task_id = ?")
+        .bind(task_id)
+        .execute(db)
+        .await?;
+    sqlx::query("DELETE FROM download_result WHERE task_id = ?")
+        .bind(task_id)
+        .execute(db)
+        .await?;
+    sqlx::query("DELETE FROM ping_result WHERE task_id = ?")
+        .bind(task_id)
+        .execute(db)
+        .await?;
+    sqlx::query("DELETE FROM task_log WHERE task_id = ?")
+        .bind(task_id)
+        .execute(db)
+        .await?;
+    sqlx::query("DELETE FROM task_metric_config WHERE task_id = ?")
+        .bind(task_id)
+        .execute(db)
+        .await?;
+    sqlx::query("DELETE FROM test_task WHERE id = ?")
+        .bind(task_id)
+        .execute(db)
+        .await?;
     Ok(())
 }
 
 /// 批量删除任务
 #[derive(Debug, Deserialize)]
-struct BatchDeleteRequest { task_ids: Vec<String> }
+struct BatchDeleteRequest {
+    task_ids: Vec<String>,
+}
 
 async fn batch_delete_tasks(
     State(state): State<AppState>,
@@ -488,10 +681,22 @@ async fn batch_delete_tasks(
             Ok(t) => t,
             Err(_) => continue,
         };
-        if task.user_id != claims.sub { continue; }
-        if task.status == "pending" || task.status == "running" { continue; }
+        if task.user_id != claims.sub {
+            continue;
+        }
+        if task.status == "pending" || task.status == "running" {
+            let cancelled = TaskService::cancel_task(&state.db, &state.cancel_tx, tid)
+                .await
+                .unwrap_or(false);
+            if !cancelled {
+                continue;
+            }
+            continue;
+        }
         delete_task_data(&state.db, tid).await.ok();
         deleted += 1;
     }
-    Ok(Json(ok(serde_json::json!({"deleted": deleted, "total": body.task_ids.len()}))))
+    Ok(Json(ok(
+        serde_json::json!({"deleted": deleted, "total": body.task_ids.len()}),
+    )))
 }

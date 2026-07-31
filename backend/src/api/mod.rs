@@ -1,9 +1,9 @@
+pub mod admin;
 pub mod auth;
+pub mod metrics;
+pub mod plan;
 pub mod task;
 pub mod ws;
-pub mod plan;
-pub mod admin;
-pub mod metrics;
 
 use axum::{
     extract::{Extension, State},
@@ -11,10 +11,9 @@ use axum::{
     routing::get,
     Router,
 };
-use jsonwebtoken::{decode, DecodingKey, Validation};
 use tracing::info;
 
-use crate::services::auth_service::Claims;
+use crate::services::auth_service::{AuthService, Claims};
 use crate::services::task_service::TaskService;
 use crate::utils::response::{ok, AppError, AppState};
 
@@ -27,7 +26,10 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/api/admin", admin::admin_routes())
         .nest("/api", metrics::metrics_routes())
         .route("/api/dashboard/stats", get(dashboard_stats))
-        .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
 
     // 公开路由（无需认证）
     let public_routes = Router::new()
@@ -54,7 +56,10 @@ async fn health_check() -> axum::Json<crate::utils::response::ApiResponse<serde_
 async fn dashboard_stats(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
-) -> Result<axum::Json<crate::utils::response::ApiResponse<crate::services::task_service::DashboardStats>>, AppError> {
+) -> Result<
+    axum::Json<crate::utils::response::ApiResponse<crate::services::task_service::DashboardStats>>,
+    AppError,
+> {
     let stats = TaskService::get_dashboard_stats(&state.db, &claims.sub)
         .await
         .map_err(|e| AppError::internal(&e.to_string()))?;
@@ -75,13 +80,9 @@ async fn auth_middleware(
 
     match auth_header {
         Some(token) => {
-            match decode::<Claims>(
-                token,
-                &DecodingKey::from_secret(state.config.jwt.secret.as_bytes()),
-                &Validation::default(),
-            ) {
-                Ok(token_data) => {
-                    request.extensions_mut().insert(token_data.claims);
+            match AuthService::verify_current_user(&state.db, &state.config, token).await {
+                Ok(claims) => {
+                    request.extensions_mut().insert(claims);
                     Ok(next.run(request).await)
                 }
                 Err(e) => {

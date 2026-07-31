@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useDialog, useMessage } from 'naive-ui'
 import { taskApi, type TestTask } from '@/api/task'
 import http from '@/api/index'
+import { getErrorMessage } from '@/api/index'
 import { formatTime } from '@/utils'
 
 const router = useRouter()
@@ -15,6 +16,7 @@ const total = ref(0)
 const page = ref(1)
 const size = ref(20)
 const loading = ref(false)
+const error = ref('')
 const filterType = ref('all')
 const filterStatus = ref('all')
 const selectedIds = ref(new Set<string>())
@@ -36,15 +38,24 @@ function toggleOne(id: string) {
 
 async function fetchTasks() {
   loading.value = true
+  error.value = ''
   try {
     const res = await taskApi.list(page.value, size.value)
     tasks.value = res.data.tasks
     total.value = res.data.total
-    } catch (e: any) { if (import.meta.env.DEV) console.error(e) }
+    } catch (e: any) {
+      error.value = getErrorMessage(e, '加载失败')
+    }
   finally { loading.value = false }
 }
 
-function handlePageChange(p: number) { page.value = p; fetchTasks() }
+function handlePageChange(p: number) { page.value = p; selectedIds.value = new Set(); fetchTasks() }
+
+function handleFilterChange() {
+  page.value = 1
+  selectedIds.value = new Set()
+  fetchTasks()
+}
 
 function typeLabel(t: string) {
   const m: Record<string,string> = { website:'网站', video:'视频', download:'下载', ping:'Ping' }
@@ -76,14 +87,14 @@ async function handleDelete(taskId: string, force?: boolean) {
         const url = force ? `/task/${taskId}?force=true` : `/task/${taskId}`
         await http.delete(url)
         fetchTasks()
-      } catch (e: any) { message.error(e.message || '删除失败') }
+      } catch (e: unknown) { message.error(getErrorMessage(e, '删除失败')) }
     },
   })
 }
 
 async function handleCancel(taskId: string) {
   try { await taskApi.cancel(taskId); fetchTasks() }
-  catch (e: any) { message.error(e.message || '取消失败') }
+  catch (e: unknown) { message.error(getErrorMessage(e, '取消失败')) }
 }
 
 async function handleBatchDelete() {
@@ -99,7 +110,7 @@ async function handleBatchDelete() {
         await http.post('/task/batch-delete', { task_ids: ids })
         selectedIds.value = new Set()
         fetchTasks()
-      } catch (e: any) { message.error(e.message || '删除失败') }
+      } catch (e: unknown) { message.error(getErrorMessage(e, '删除失败')) }
     },
   })
 }
@@ -112,24 +123,27 @@ onMounted(() => { fetchTasks() })
     <div class="page-header">
       <h1 class="page-title">历史记录</h1>
       <div class="header-actions">
-        <select v-model="filterType" @change="fetchTasks" class="filter-select">
+        <select v-model="filterType" @change="handleFilterChange" class="filter-select">
           <option value="all">全部类型</option>
           <option value="website">网站</option><option value="video">视频</option>
           <option value="download">下载</option><option value="ping">Ping</option>
         </select>
-        <select v-model="filterStatus" @change="fetchTasks" class="filter-select">
+        <select v-model="filterStatus" @change="handleFilterChange" class="filter-select">
           <option value="all">全部状态</option>
           <option value="completed">已完成</option><option value="failed">失败</option>
           <option value="running">运行中</option><option value="cancelled">已取消</option>
         </select>
-        <button class="btn" @click="fetchTasks">刷新</button>
+         <button class="btn" @click="fetchTasks">刷新</button>
         <button v-if="selectedIds.size > 0" class="btn danger" @click="handleBatchDelete">
           删除选中 ({{ selectedIds.size }})
         </button>
       </div>
     </div>
 
-    <table class="dt" v-if="filteredTasks().length">
+     <div v-if="error" class="empty-text error-text">
+       {{ error }} <button class="link" @click="fetchTasks">重试</button>
+     </div>
+     <table class="dt" v-else-if="filteredTasks().length">
       <thead><tr>
         <th><input type="checkbox" :checked="allSelected" @change="toggleAll" /></th>
         <th>ID</th><th>类型</th><th>状态</th><th>进度</th><th>创建时间</th><th>操作</th>
@@ -151,7 +165,15 @@ onMounted(() => { fetchTasks() })
         </tr>
       </tbody>
     </table>
-    <div v-else class="empty-text">暂无记录</div>
+      <div v-else class="empty-text">
+        {{ filterType !== 'all' || filterStatus !== 'all' ? '当前页没有符合筛选条件的记录' : '暂无记录' }}
+      </div>
+      <div v-if="filterType !== 'all' || filterStatus !== 'all'" class="filter-scope">筛选仅应用于当前页，任务列表接口暂不支持服务端筛选</div>
+     <div v-if="total > size" class="pagination">
+       <button class="btn" :disabled="page <= 1" @click="handlePageChange(page - 1)">上一页</button>
+       <span>第 {{ page }} / {{ Math.ceil(total / size) }} 页</span>
+       <button class="btn" :disabled="page >= Math.ceil(total / size)" @click="handlePageChange(page + 1)">下一页</button>
+     </div>
   </div>
 </template>
 
@@ -161,6 +183,7 @@ onMounted(() => { fetchTasks() })
 .page-title { font-size: 20px; font-weight: 700; margin: 0; }
 .header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .filter-select { height: 32px; padding: 0 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-card); color: var(--text-primary); font-size: 13px; }
+.filter-scope { margin-top: 8px; text-align: center; color: var(--text-tertiary); font-size: 12px; }
 .btn { height: 32px; padding: 0 12px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
 .btn.danger { background: var(--color-danger); color: white; border-color: var(--color-danger); }
 .dt { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -175,4 +198,6 @@ onMounted(() => { fetchTasks() })
 .tag-running { color: var(--color-primary-text); background: var(--color-primary-bg); padding: 2px 8px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 600; letter-spacing: 0.125px; }
 .tag-pending, .tag-cancelled { color: var(--text-tertiary); background: rgba(163,158,152,0.15); padding: 2px 8px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 600; letter-spacing: 0.125px; }
 .empty-text { text-align: center; padding: 40px; color: var(--text-tertiary); }
+.error-text { color: var(--color-danger); }
+.pagination { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 16px; }
 </style>

@@ -1,5 +1,5 @@
-use std::sync::Mutex;
 use serde::Deserialize;
+use std::sync::Mutex;
 
 /// CDP Page 域采集的数据
 #[derive(Debug, Clone, Default)]
@@ -40,7 +40,10 @@ pub struct PageCollector {
 
 impl PageCollector {
     pub fn new() -> Self {
-        Self { data: Mutex::new(PageMetrics::default()), start: std::time::Instant::now() }
+        Self {
+            data: Mutex::new(PageMetrics::default()),
+            start: std::time::Instant::now(),
+        }
     }
     pub fn record_navigation(&self) {
         if let Ok(mut m) = self.data.lock() {
@@ -65,7 +68,9 @@ impl PageCollector {
 pub struct NetworkCollector;
 
 impl NetworkCollector {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     /// 完整性能采集 JS — 输出 25+ 指标
     pub fn collect_js() -> &'static str {
@@ -149,17 +154,25 @@ impl NetworkCollector {
     pub fn parse(data: serde_json::Value) -> NetworkMetrics {
         let r = serde_json::from_value::<RawPerf>(data).unwrap_or_default();
         NetworkMetrics {
-            request_count: r.count, failed_count: r.failed,
+            request_count: r.count,
+            failed_count: r.failed,
             total_transfer_size: r.total as u64,
-            html_size: r.html as u64, css_size: r.css as u64,
-            js_size: r.js as u64, image_size: r.img as u64,
-            font_size: r.font as u64, media_size: r.media as u64,
+            html_size: r.html as u64,
+            css_size: r.css as u64,
+            js_size: r.js as u64,
+            image_size: r.img as u64,
+            font_size: r.font as u64,
+            media_size: r.media as u64,
             site_size_kb: r.siteSizeKB,
             avg_speed_kbps: r.avgSpeedKbps,
             total_speed_kbps: r.totalSpeedKbps,
             first_screen_ratio: r.firstScreenRatio,
             dns_ms: if r.dns > 0.0 { Some(r.dns) } else { None },
-            connect_ms: if r.connect > 0.0 { Some(r.connect) } else { None },
+            connect_ms: if r.connect > 0.0 {
+                Some(r.connect)
+            } else {
+                None
+            },
         }
     }
 }
@@ -167,29 +180,51 @@ impl NetworkCollector {
 #[derive(Debug, Deserialize, Default)]
 struct RawPerf {
     // Paint
-    #[serde(default)] fp: f64,
-    #[serde(default)] fcp: f64,
-    #[serde(default)] lcp: f64,
-    #[serde(default)] dcl: f64,
-    #[serde(default)] load: f64,
+    #[serde(default)]
+    fp: f64,
+    #[serde(default)]
+    fcp: f64,
+    #[serde(default)]
+    lcp: f64,
+    #[serde(default)]
+    dcl: f64,
+    #[serde(default)]
+    load: f64,
     // Network (navigation timing)
-    #[serde(default)] dns: f64,
-    #[serde(default)] connect: f64,
-    #[serde(default)] ttfb: f64,
-    #[serde(default)] httpStatus: i32,
+    #[serde(default)]
+    dns: f64,
+    #[serde(default)]
+    connect: f64,
+    #[serde(default)]
+    ttfb: f64,
+    #[serde(default)]
+    httpStatus: i32,
     // Resources
-    #[serde(default)] count: i32,
-    #[serde(default)] total: f64,
-    #[serde(default)] html: f64,
-    #[serde(default)] css: f64,
-    #[serde(default)] js: f64,
-    #[serde(default)] img: f64,
-    #[serde(default)] font: f64,
-    #[serde(default)] media: f64,
-    #[serde(default)] failed: i32,
+    #[serde(default)]
+    count: i32,
+    #[serde(default)]
+    total: f64,
+    #[serde(default)]
+    html: f64,
+    #[serde(default)]
+    css: f64,
+    #[serde(default)]
+    js: f64,
+    #[serde(default)]
+    img: f64,
+    #[serde(default)]
+    font: f64,
+    #[serde(default)]
+    media: f64,
+    #[serde(default)]
+    failed: i32,
     // Derived
-    #[serde(default)] siteSizeKB: f64,
-    #[serde(default)] avgSpeedKbps: f64,
-    #[serde(default)] totalSpeedKbps: f64,
-    #[serde(default)] firstScreenRatio: f64,
+    #[serde(default)]
+    siteSizeKB: f64,
+    #[serde(default)]
+    avgSpeedKbps: f64,
+    #[serde(default)]
+    totalSpeedKbps: f64,
+    #[serde(default)]
+    firstScreenRatio: f64,
 }

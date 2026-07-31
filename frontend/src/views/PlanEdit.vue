@@ -225,10 +225,11 @@ watch(currentCron, (val) => {
   }
 })
 
-async function loadPlan() {
+async function loadPlan(version = loadVersion) {
   if (!isEdit.value || !planId.value) return
   try {
     const plan = await planStore.fetchPlan(planId.value)
+    if (version !== loadVersion || planId.value !== plan.id) return
     name.value = plan.name
     description.value = plan.description || ''
     enabled.value = plan.enabled === 1
@@ -247,16 +248,27 @@ async function loadPlan() {
       cronPreset.value = ''
     }
 
-    items.value = plan.items.map(it => ({
-      task_type: it.task_type,
-      urls: typeof it.urls === 'string' ? JSON.parse(it.urls) : it.urls,
-      options: it.options ? (typeof it.options === 'string' ? JSON.parse(it.options) : it.options) : {},
-      repeat_count: it.repeat_count || 1,
-    }))
+    items.value = plan.items.map(it => {
+      let urls: string[] = []
+      let options: Record<string, unknown> = {}
+      try {
+        urls = typeof it.urls === 'string' ? JSON.parse(it.urls) : it.urls
+        options = it.options ? (typeof it.options === 'string' ? JSON.parse(it.options) : it.options) : {}
+      } catch {
+        throw new Error('计划数据格式无效')
+      }
+      return { task_type: it.task_type, urls, options, repeat_count: it.repeat_count || 1 }
+    })
   } catch (e: any) {
     message.error(e.message || '加载失败')
     router.push('/plans')
   }
+}
+
+let loadVersion = 0
+async function loadPlanForRoute() {
+  const version = ++loadVersion
+  await loadPlan(version)
 }
 
 async function handleSave() {
@@ -324,7 +336,22 @@ onMounted(() => {
   if (items.value.length === 0 && !isEdit.value) {
     addItem()
   }
-  loadPlan()
+  loadPlanForRoute()
+})
+
+watch([isEdit, planId], ([edit, id], oldValue) => {
+  if (oldValue && edit === oldValue[0] && id === oldValue[1]) return
+  if (edit && id) {
+    name.value = ''
+    description.value = ''
+    items.value = []
+    loadPlanForRoute()
+  } else if (!edit) {
+    name.value = ''
+    description.value = ''
+    items.value = []
+    addItem()
+  }
 })
 </script>
 

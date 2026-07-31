@@ -7,6 +7,7 @@ import {
   useMessage, NIcon
 } from 'naive-ui'
 import { taskApi } from '@/api/task'
+import { getErrorMessage } from '@/api/index'
 import MetricSelector from '@/components/MetricSelector.vue'
 
 const message = useMessage()
@@ -39,8 +40,11 @@ async function loadTemplate() {
   finally { loading.value = false }
 }
 
-function downloadTemplateFile(): void {
-  if (!templateData.value) { loadTemplate().then(() => downloadTemplateFile()); return }
+async function downloadTemplateFile(): Promise<void> {
+  if (!templateData.value) {
+    await loadTemplate()
+    if (!templateData.value) return
+  }
   const batch = { tasks: templateData.value.examples.map((ex: any) => ({ task_type: ex.task_type, urls: ex.urls, options: ex.options || { repeat_count: 1 } })) }
   const blob = new Blob([JSON.stringify(batch, null, 2)], { type: 'application/json' })
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'netpulse-template.json'; a.click()
@@ -74,7 +78,7 @@ async function doImport() {
   try {
     const res = await taskApi.importBatch({ tasks })
     importResult.value = res.data; message.success(res.data.message)
-  } catch (e: any) { message.error(e?.msg || '导入失败') }
+  } catch (e: unknown) { message.error(getErrorMessage(e, '导入失败')) }
   finally { loading.value = false }
 }
 
@@ -86,7 +90,7 @@ async function doCreate() {
     if (taskType.value === 'ping') opts.ping_count = pingCount.value
     await taskApi.create({ task_type: taskType.value, urls: urlList.value, options: opts })
     message.success('任务已创建'); importResult.value = null
-  } catch (e: any) { message.error(e?.msg || '创建失败') }
+  } catch (e: unknown) { message.error(getErrorMessage(e, '创建失败')) }
   finally { loading.value = false }
 }
 </script>

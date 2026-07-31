@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, h } from 'vue'
 import { useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
 import { usePlanStore } from '@/stores/plan'
 import { useTaskStore } from '@/stores/task'
-import { getWsClient, type ProgressMessage } from '@/api/ws'
+import { getErrorMessage } from '@/api/index'
 import { formatMs, formatTime } from '@/utils'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
@@ -15,12 +14,9 @@ import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from
 use([CanvasRenderer, LineChart, PieChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent])
 
 const router = useRouter()
-const message = useMessage()
 const planStore = usePlanStore()
 const taskStore = useTaskStore()
-const ws = getWsClient()
-
-let unsubWs: (() => void) | null = null
+const dashboardError = ref('')
 
 const trendOption = ref<any>({
   tooltip: { trigger: 'axis' },
@@ -82,21 +78,22 @@ function updateCharts(stats: any) {
   }
 }
 
-function handleWsMessage(msg: ProgressMessage) {
-  if (['task_completed', 'task_failed', 'progress_update'].includes(msg.type)) {
-    taskStore.refreshDashboard()
+async function loadDashboard() {
+  dashboardError.value = ''
+  try {
+    await Promise.all([taskStore.refreshDashboard(), planStore.fetchAllPlans()])
+  } catch (e) {
+    dashboardError.value = getErrorMessage(e, '概览加载失败')
   }
 }
 
 onMounted(() => {
   taskStore.connectWs()
-  taskStore.refreshDashboard()
-  unsubWs = ws.onMessage(handleWsMessage)
-  planStore.fetchPlans(1, 5)
+  loadDashboard()
 })
 
 onUnmounted(() => {
-  if (unsubWs) unsubWs()
+  taskStore.disconnectWs()
 })
 
 watch(() => taskStore.dashboardStats, (stats) => {
@@ -127,6 +124,10 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
       <button class="banner-btn" @click="router.push('/plans/new')">+ 新建计划</button>
     </div>
 
+    <div v-if="dashboardError" class="load-error">
+      {{ dashboardError }} <button class="link-btn" @click="loadDashboard">重试</button>
+    </div>
+
     <!-- 统计卡片 -->
     <div class="stats-grid">
       <div class="stat-card">
@@ -134,7 +135,7 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
         <div class="stat-content">
           <div class="stat-label">启用计划</div>
           <div class="stat-value">{{ enabledPlanCount() }}</div>
-          <div class="stat-sub">共 {{ planStore.total }} 个计划</div>
+           <div class="stat-sub">共 {{ planStore.total }} 个计划</div>
         </div>
       </div>
       <div class="stat-card">
@@ -440,6 +441,15 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
   text-align: center;
   color: var(--text-tertiary);
   font-size: 13px;
+}
+
+.load-error {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
+  background: rgba(208, 48, 80, 0.08);
 }
 
 .upcoming-list, .recent-plans-list {

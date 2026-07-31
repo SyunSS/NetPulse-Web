@@ -10,6 +10,7 @@ export const useTaskStore = defineStore('task', () => {
   const dashboardStats = ref<DashboardStats | null>(null)
 
   let wsConnected = false
+  let unsubscribeWs: (() => boolean) | null = null
 
   /** 连接 WebSocket */
   function connectWs() {
@@ -17,7 +18,14 @@ export const useTaskStore = defineStore('task', () => {
     wsConnected = true
     const ws = getWsClient()
     ws.connect()
-    ws.onMessage(handleWsMessage)
+    unsubscribeWs = ws.onMessage(handleWsMessage)
+  }
+
+  function disconnectWs() {
+    unsubscribeWs?.()
+    unsubscribeWs = null
+    wsConnected = false
+    getWsClient().close()
   }
 
   /** 处理 WebSocket 消息 */
@@ -35,7 +43,7 @@ export const useTaskStore = defineStore('task', () => {
       case 'task_completed':
       case 'task_failed':
         // 任务结束，刷新 dashboard
-        refreshDashboard()
+        refreshDashboard().catch(() => undefined)
         break
     }
   }
@@ -77,12 +85,9 @@ export const useTaskStore = defineStore('task', () => {
 
   /** 刷新 Dashboard 统计 */
   async function refreshDashboard() {
-    try {
-      const res = await dashboardApi.getStats()
-      dashboardStats.value = res.data
-    } catch (e) {
-      if (import.meta.env.DEV) console.error('刷新Dashboard失败:', e)
-    }
+    const res = await dashboardApi.getStats()
+    dashboardStats.value = res.data
+    return res.data
   }
 
   return {
@@ -91,6 +96,7 @@ export const useTaskStore = defineStore('task', () => {
     taskLogs,
     dashboardStats,
     connectWs,
+    disconnectWs,
     createTask,
     fetchTaskList,
     fetchTaskResults,

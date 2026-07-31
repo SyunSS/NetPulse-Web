@@ -21,7 +21,12 @@ pub fn export_website_xlsx(
     task_id: &str,
     output_dir: &str,
 ) -> anyhow::Result<String> {
-    let filename = format!("{}/website_{}_{}.xlsx", output_dir, task_id, Utc::now().timestamp());
+    let filename = format!(
+        "{}/website_{}_{}.xlsx",
+        output_dir,
+        task_id,
+        Utc::now().timestamp()
+    );
     let mut workbook = Workbook::new();
     let sheet = workbook.add_worksheet();
 
@@ -46,9 +51,23 @@ pub fn export_website_xlsx(
 
     // === 表头 ===
     let headers = [
-        "序号", "URL", "DNS解析时延(ms)", "DNS解析成功率(%)", "TCP连接时延(ms)",
-        "访问成功率(%)", "首包时延(ms)", "首屏时延(ms)", "首页时延(ms)", "最大内容绘制(ms)",
-        "总请求", "总大小(KB)", "HTML(KB)", "CSS(KB)", "JS(KB)", "图片(KB)", "字体(KB)",
+        "序号",
+        "URL",
+        "DNS解析时延(ms)",
+        "DNS解析成功率(%)",
+        "TCP连接时延(ms)",
+        "访问成功率(%)",
+        "首包时延(ms)",
+        "首屏时延(ms)",
+        "首页时延(ms)",
+        "最大内容绘制(ms)",
+        "总请求",
+        "总大小(KB)",
+        "HTML(KB)",
+        "CSS(KB)",
+        "JS(KB)",
+        "图片(KB)",
+        "字体(KB)",
     ];
 
     for (col, h) in headers.iter().enumerate() {
@@ -85,7 +104,10 @@ pub fn export_website_xlsx(
         let max_len = std::cmp::max(
             headers[col as usize].len() as u16,
             db_data.iter().fold(0u16, |acc, r| {
-                let s = match col { 1 => r.url.len() as u16, _ => 10 };
+                let s = match col {
+                    1 => r.url.len() as u16,
+                    _ => 10,
+                };
                 acc.max(s)
             }),
         );
@@ -105,20 +127,44 @@ pub fn export_video_xlsx(
     task_id: &str,
     output_dir: &str,
 ) -> anyhow::Result<String> {
-    let filename = format!("{}/video_{}_{}.xlsx", output_dir, task_id, Utc::now().timestamp());
+    let filename = format!(
+        "{}/video_{}_{}.xlsx",
+        output_dir,
+        task_id,
+        Utc::now().timestamp()
+    );
     let mut workbook = Workbook::new();
     let sheet = workbook.add_worksheet();
 
-    let header_fmt = Format::new().set_bold().set_font_color(Color::White)
-        .set_background_color(Color::RGB(0x4472C4)).set_border(FormatBorder::Thin);
+    let header_fmt = Format::new()
+        .set_bold()
+        .set_font_color(Color::White)
+        .set_background_color(Color::RGB(0x4472C4))
+        .set_border(FormatBorder::Thin);
     let cell_fmt = Format::new().set_border(FormatBorder::Thin);
-    let ok_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0x008000));
-    let err_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0xFF0000));
+    let ok_fmt = Format::new()
+        .set_border(FormatBorder::Thin)
+        .set_font_color(Color::RGB(0x008000));
+    let err_fmt = Format::new()
+        .set_border(FormatBorder::Thin)
+        .set_font_color(Color::RGB(0xFF0000));
 
     let headers = [
-        "序号", "URL", "平台", "首帧时延(ms)", "缓冲次数", "缓冲总时长(ms)",
-        "播放成功", "下载速率(KB/s)", "视频大小(B)", "视频时长(ms)",
-        "丢帧数", "解码帧数", "页面标题", "截图路径", "错误",
+        "序号",
+        "URL",
+        "平台",
+        "首帧时延(ms)",
+        "缓冲次数",
+        "缓冲总时长(ms)",
+        "播放成功",
+        "下载速率(KB/s)",
+        "视频大小(B)",
+        "视频时长(ms)",
+        "丢帧数",
+        "解码帧数",
+        "页面标题",
+        "截图路径",
+        "错误",
     ];
 
     for (col, h) in headers.iter().enumerate() {
@@ -136,7 +182,16 @@ pub fn export_video_xlsx(
         write_num(sheet, row, 3, r.first_play_time_ms, rf)?;
         write_num_i32(sheet, row, 4, r.buffer_count, rf)?;
         write_num(sheet, row, 5, r.total_buffer_time_ms, rf)?;
-        sheet.write_with_format(row, 6, if r.play_success == Some(1) { "成功" } else { "失败" }, rf)?;
+        sheet.write_with_format(
+            row,
+            6,
+            if r.play_success == Some(1) {
+                "成功"
+            } else {
+                "失败"
+            },
+            rf,
+        )?;
         write_num(sheet, row, 7, r.video_download_speed, rf)?;
         write_num_i32(sheet, row, 8, r.video_size, rf)?;
         write_num(sheet, row, 9, r.video_duration_ms, rf)?;
@@ -161,18 +216,35 @@ pub fn export_download_xlsx(
     task_id: &str,
     output_dir: &str,
 ) -> anyhow::Result<String> {
-    let filename = format!("{}/download_{}_{}.xlsx", output_dir, task_id, Utc::now().timestamp());
+    let filename = format!(
+        "{}/download_{}_{}.xlsx",
+        output_dir,
+        task_id,
+        Utc::now().timestamp()
+    );
     let mut workbook = Workbook::new();
     let sheet = workbook.add_worksheet();
 
-    let header_fmt = Format::new().set_bold().set_font_color(Color::White)
-        .set_background_color(Color::RGB(0x4472C4)).set_border(FormatBorder::Thin);
-    let ok_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0x008000));
-    let err_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0xFF0000));
+    let header_fmt = Format::new()
+        .set_bold()
+        .set_font_color(Color::White)
+        .set_background_color(Color::RGB(0x4472C4))
+        .set_border(FormatBorder::Thin);
+    let ok_fmt = Format::new()
+        .set_border(FormatBorder::Thin)
+        .set_font_color(Color::RGB(0x008000));
+    let err_fmt = Format::new()
+        .set_border(FormatBorder::Thin)
+        .set_font_color(Color::RGB(0xFF0000));
 
     let headers = [
-        "序号", "URL", "文件DNS时延(ms)", "DNS解析成功率(%)", "文件TCP连接时延(ms)",
-        "文件下载速率(Mbps)", "文件下载成功率(%)",
+        "序号",
+        "URL",
+        "文件DNS时延(ms)",
+        "DNS解析成功率(%)",
+        "文件TCP连接时延(ms)",
+        "文件下载速率(Mbps)",
+        "文件下载成功率(%)",
     ];
 
     for (col, h) in headers.iter().enumerate() {
@@ -209,17 +281,35 @@ pub fn export_ping_xlsx(
     task_id: &str,
     output_dir: &str,
 ) -> anyhow::Result<String> {
-    let filename = format!("{}/ping_{}_{}.xlsx", output_dir, task_id, Utc::now().timestamp());
+    let filename = format!(
+        "{}/ping_{}_{}.xlsx",
+        output_dir,
+        task_id,
+        Utc::now().timestamp()
+    );
     let mut workbook = Workbook::new();
     let sheet = workbook.add_worksheet();
 
-    let header_fmt = Format::new().set_bold().set_font_color(Color::White)
-        .set_background_color(Color::RGB(0x4472C4)).set_border(FormatBorder::Thin);
-    let ok_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0x008000));
-    let err_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0xFF0000));
+    let header_fmt = Format::new()
+        .set_bold()
+        .set_font_color(Color::White)
+        .set_background_color(Color::RGB(0x4472C4))
+        .set_border(FormatBorder::Thin);
+    let ok_fmt = Format::new()
+        .set_border(FormatBorder::Thin)
+        .set_font_color(Color::RGB(0x008000));
+    let err_fmt = Format::new()
+        .set_border(FormatBorder::Thin)
+        .set_font_color(Color::RGB(0xFF0000));
 
     let headers = [
-        "序号", "目标主机", "平均时延(ms)", "丢包率(%)", "抖动(ms)", "成功率(%)", "错误",
+        "序号",
+        "目标主机",
+        "平均时延(ms)",
+        "丢包率(%)",
+        "抖动(ms)",
+        "成功率(%)",
+        "错误",
     ];
 
     for (col, h) in headers.iter().enumerate() {
@@ -250,43 +340,108 @@ pub fn export_ping_xlsx(
 
 // === 辅助函数 ===
 
-fn write_num(sheet: &mut Worksheet, row: u32, col: u16, val: Option<f64>, fmt: &Format) -> Result<(), XlsxError> {
+fn write_num(
+    sheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    val: Option<f64>,
+    fmt: &Format,
+) -> Result<(), XlsxError> {
     match val {
-        Some(v) => { sheet.write_with_format(row, col, v, fmt)?; Ok(()) }
-        None => { sheet.write_with_format(row, col, "-", fmt)?; Ok(()) }
+        Some(v) => {
+            sheet.write_with_format(row, col, v, fmt)?;
+            Ok(())
+        }
+        None => {
+            sheet.write_with_format(row, col, "-", fmt)?;
+            Ok(())
+        }
     }
 }
 
-fn write_num_i32(sheet: &mut Worksheet, row: u32, col: u16, val: Option<i32>, fmt: &Format) -> Result<(), XlsxError> {
+fn write_num_i32(
+    sheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    val: Option<i32>,
+    fmt: &Format,
+) -> Result<(), XlsxError> {
     match val {
-        Some(v) => { sheet.write_with_format(row, col, v, fmt)?; Ok(()) }
-        None => { sheet.write_with_format(row, col, "-", fmt)?; Ok(()) }
+        Some(v) => {
+            sheet.write_with_format(row, col, v, fmt)?;
+            Ok(())
+        }
+        None => {
+            sheet.write_with_format(row, col, "-", fmt)?;
+            Ok(())
+        }
     }
 }
 
-fn write_ok(sheet: &mut Worksheet, row: u32, col: u16, val: Option<i32>, fmt: &Format) -> Result<(), XlsxError> {
+fn write_ok(
+    sheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    val: Option<i32>,
+    fmt: &Format,
+) -> Result<(), XlsxError> {
     match val {
-        Some(v) => { sheet.write_with_format(row, col, v, fmt)?; Ok(()) }
-        None => { sheet.write_with_format(row, col, "-", fmt)?; Ok(()) }
+        Some(v) => {
+            sheet.write_with_format(row, col, v, fmt)?;
+            Ok(())
+        }
+        None => {
+            sheet.write_with_format(row, col, "-", fmt)?;
+            Ok(())
+        }
     }
 }
 
-fn write_success(sheet: &mut Worksheet, row: u32, col: u16, ok: bool, fmt: &Format) -> Result<(), XlsxError> {
+fn write_success(
+    sheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    ok: bool,
+    fmt: &Format,
+) -> Result<(), XlsxError> {
     sheet.write_with_format(row, col, if ok { "100" } else { "0" }, fmt)?;
     Ok(())
 }
 
-fn write_kb(sheet: &mut Worksheet, row: u32, col: u16, val_bytes: Option<i32>, fmt: &Format) -> Result<(), XlsxError> {
+fn write_kb(
+    sheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    val_bytes: Option<i32>,
+    fmt: &Format,
+) -> Result<(), XlsxError> {
     match val_bytes {
-        Some(v) => { sheet.write_with_format(row, col, (v as f64 / 1024.0), fmt)?; Ok(()) }
-        None => { sheet.write_with_format(row, col, "-", fmt)?; Ok(()) }
+        Some(v) => {
+            sheet.write_with_format(row, col, (v as f64 / 1024.0), fmt)?;
+            Ok(())
+        }
+        None => {
+            sheet.write_with_format(row, col, "-", fmt)?;
+            Ok(())
+        }
     }
 }
 
 // === CSV / JSON 导出 ===
 
-pub fn export_csv<T: serde::Serialize>(data: &[T], task_id: &str, output_dir: &str, prefix: &str) -> anyhow::Result<String> {
-    let filename = format!("{}/{}_{}_{}.csv", output_dir, prefix, task_id, Utc::now().timestamp());
+pub fn export_csv<T: serde::Serialize>(
+    data: &[T],
+    task_id: &str,
+    output_dir: &str,
+    prefix: &str,
+) -> anyhow::Result<String> {
+    let filename = format!(
+        "{}/{}_{}_{}.csv",
+        output_dir,
+        prefix,
+        task_id,
+        Utc::now().timestamp()
+    );
     let mut wtr = csv::Writer::from_path(&filename)?;
     for row in data {
         wtr.serialize(row)?;
@@ -319,17 +474,29 @@ pub fn export_plan_run_xlsx(
     run_id: &str,
     output_dir: &str,
 ) -> anyhow::Result<String> {
-    let filename = format!("{}/planrun_{}_{}_{}.xlsx", output_dir,
+    let filename = format!(
+        "{}/planrun_{}_{}_{}.xlsx",
+        output_dir,
         plan_id.chars().take(8).collect::<String>(),
         run_id.chars().take(8).collect::<String>(),
-        Utc::now().timestamp());
+        Utc::now().timestamp()
+    );
     let mut workbook = Workbook::new();
 
-    let header_fmt = Format::new().set_bold().set_font_color(Color::White)
-        .set_background_color(Color::RGB(0x4472C4)).set_border(FormatBorder::Thin);
-    let ok_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0x008000));
-    let err_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0xFF0000));
-    let url_fmt = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0x0563C1));
+    let header_fmt = Format::new()
+        .set_bold()
+        .set_font_color(Color::White)
+        .set_background_color(Color::RGB(0x4472C4))
+        .set_border(FormatBorder::Thin);
+    let ok_fmt = Format::new()
+        .set_border(FormatBorder::Thin)
+        .set_font_color(Color::RGB(0x008000));
+    let err_fmt = Format::new()
+        .set_border(FormatBorder::Thin)
+        .set_font_color(Color::RGB(0xFF0000));
+    let url_fmt = Format::new()
+        .set_border(FormatBorder::Thin)
+        .set_font_color(Color::RGB(0x0563C1));
 
     // 任务概览表
     let summary = workbook.add_worksheet().set_name("任务概览")?;
@@ -339,8 +506,20 @@ pub fn export_plan_run_xlsx(
     }
     for (i, s) in summaries.iter().enumerate() {
         let row = (i + 1) as u32;
-        let fmt: &Format = if s.status == "completed" { &ok_fmt } else if s.status == "failed" { &err_fmt } else { &ok_fmt };
-        let type_label = match s.task_type.as_str() { "website" => "网站测试", "video" => "视频测试", "download" => "下载测试", "ping" => "Ping测试", _ => &s.task_type };
+        let fmt: &Format = if s.status == "completed" {
+            &ok_fmt
+        } else if s.status == "failed" {
+            &err_fmt
+        } else {
+            &ok_fmt
+        };
+        let type_label = match s.task_type.as_str() {
+            "website" => "网站测试",
+            "video" => "视频测试",
+            "download" => "下载测试",
+            "ping" => "Ping测试",
+            _ => &s.task_type,
+        };
         summary.write_with_format(row, 0, &s.task_id, fmt)?;
         summary.write_with_format(row, 1, type_label, fmt)?;
         summary.write_with_format(row, 2, &s.status, fmt)?;
@@ -355,9 +534,22 @@ pub fn export_plan_run_xlsx(
     if !website_data.is_empty() {
         let sheet = workbook.add_worksheet().set_name("网站测试")?;
         let headers = [
-            "URL", "DNS解析时延(ms)", "DNS解析成功率(%)", "TCP连接时延(ms)",
-            "访问成功率(%)", "首包时延(ms)", "首屏时延(ms)", "首页时延(ms)", "最大内容绘制(ms)",
-            "总请求", "总大小(KB)", "HTML(KB)", "CSS(KB)", "JS(KB)", "图片(KB)", "字体(KB)",
+            "URL",
+            "DNS解析时延(ms)",
+            "DNS解析成功率(%)",
+            "TCP连接时延(ms)",
+            "访问成功率(%)",
+            "首包时延(ms)",
+            "首屏时延(ms)",
+            "首页时延(ms)",
+            "最大内容绘制(ms)",
+            "总请求",
+            "总大小(KB)",
+            "HTML(KB)",
+            "CSS(KB)",
+            "JS(KB)",
+            "图片(KB)",
+            "字体(KB)",
         ];
         for (col, h) in headers.iter().enumerate() {
             sheet.write_with_format(0, col as u16, *h, &header_fmt)?;
@@ -383,7 +575,9 @@ pub fn export_plan_run_xlsx(
             write_kb(sheet, row, 14, r.image_size, fmt)?;
             write_kb(sheet, row, 15, r.font_size, fmt)?;
         }
-        for col in 0..headers.len() as u16 { sheet.set_column_width(col, 14.0)?; }
+        for col in 0..headers.len() as u16 {
+            sheet.set_column_width(col, 14.0)?;
+        }
         sheet.set_freeze_panes(1, 0)?;
     }
 
@@ -391,9 +585,23 @@ pub fn export_plan_run_xlsx(
     if !video_data.is_empty() {
         let sheet = workbook.add_worksheet().set_name("视频测试")?;
         let headers = [
-            "URL", "平台", "DNS(ms)", "DNS成功率(%)", "TCP(ms)", "HTTP响应(ms)",
-            "首帧时延(ms)", "缓冲次数", "缓冲总时长(ms)", "缓冲率(%)", "下载速率(KB/s)",
-            "视频大小(B)", "视频时长(ms)", "丢帧数", "解码帧数", "页面标题", "错误",
+            "URL",
+            "平台",
+            "DNS(ms)",
+            "DNS成功率(%)",
+            "TCP(ms)",
+            "HTTP响应(ms)",
+            "首帧时延(ms)",
+            "缓冲次数",
+            "缓冲总时长(ms)",
+            "缓冲率(%)",
+            "下载速率(KB/s)",
+            "视频大小(B)",
+            "视频时长(ms)",
+            "丢帧数",
+            "解码帧数",
+            "页面标题",
+            "错误",
         ];
         for (col, h) in headers.iter().enumerate() {
             sheet.write_with_format(0, col as u16, *h, &header_fmt)?;
@@ -420,7 +628,9 @@ pub fn export_plan_run_xlsx(
             sheet.write_with_format(row, 15, r.page_title.as_deref().unwrap_or("-"), fmt)?;
             sheet.write_with_format(row, 16, r.error_msg.as_deref().unwrap_or(""), fmt)?;
         }
-        for col in 0..headers.len() as u16 { sheet.set_column_width(col, 16.0)?; }
+        for col in 0..headers.len() as u16 {
+            sheet.set_column_width(col, 16.0)?;
+        }
         sheet.set_freeze_panes(1, 0)?;
     }
 
@@ -428,8 +638,12 @@ pub fn export_plan_run_xlsx(
     if !download_data.is_empty() {
         let sheet = workbook.add_worksheet().set_name("下载测试")?;
         let headers = [
-            "URL", "文件DNS时延(ms)", "DNS解析成功率(%)", "文件TCP连接时延(ms)",
-            "文件下载速率(Mbps)", "文件下载成功率(%)",
+            "URL",
+            "文件DNS时延(ms)",
+            "DNS解析成功率(%)",
+            "文件TCP连接时延(ms)",
+            "文件下载速率(Mbps)",
+            "文件下载成功率(%)",
         ];
         for (col, h) in headers.iter().enumerate() {
             sheet.write_with_format(0, col as u16, *h, &header_fmt)?;
@@ -446,14 +660,23 @@ pub fn export_plan_run_xlsx(
             write_num(sheet, row, 4, speed_mbps, fmt)?;
             write_success(sheet, row, 5, ok, fmt)?;
         }
-        for col in 0..headers.len() as u16 { sheet.set_column_width(col, 18.0)?; }
+        for col in 0..headers.len() as u16 {
+            sheet.set_column_width(col, 18.0)?;
+        }
         sheet.set_freeze_panes(1, 0)?;
     }
 
     // Ping 测试结果
     if !ping_data.is_empty() {
         let sheet = workbook.add_worksheet().set_name("Ping测试")?;
-        let headers = ["目标主机", "平均时延(ms)", "丢包率(%)", "抖动(ms)", "结果", "错误"];
+        let headers = [
+            "目标主机",
+            "平均时延(ms)",
+            "丢包率(%)",
+            "抖动(ms)",
+            "结果",
+            "错误",
+        ];
         for (col, h) in headers.iter().enumerate() {
             sheet.write_with_format(0, col as u16, *h, &header_fmt)?;
         }
@@ -468,7 +691,9 @@ pub fn export_plan_run_xlsx(
             sheet.write_with_format(row, 4, if ok { "成功" } else { "失败" }, fmt)?;
             sheet.write_with_format(row, 5, r.error_msg.as_deref().unwrap_or(""), fmt)?;
         }
-        for col in 0..headers.len() as u16 { sheet.set_column_width(col, 18.0)?; }
+        for col in 0..headers.len() as u16 {
+            sheet.set_column_width(col, 18.0)?;
+        }
         sheet.set_freeze_panes(1, 0)?;
     }
 

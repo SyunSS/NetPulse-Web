@@ -4,7 +4,9 @@ use std::time::Duration;
 use chrono::Utc;
 use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -15,7 +17,7 @@ use crate::engines::download::DownloadEngine;
 use crate::engines::http::HttpEngine;
 use crate::engines::ping::PingEngine;
 use crate::engines::video::VideoEngine;
-use crate::models::task::{DownloadResult, PingResult, TestConfig, VideoResult, WebsiteResult};
+use crate::models::task::{DownloadResult, PingResult, VideoResult, WebsiteResult};
 use crate::storage::StorageManager;
 use crate::utils::response::{ProgressMessage, TaskJob};
 
@@ -26,7 +28,8 @@ pub struct TaskWorker {
     task_rx: mpsc::Receiver<TaskJob>,
     progress_tx: broadcast::Sender<ProgressMessage>,
     cancel_rx: tokio::sync::broadcast::Receiver<String>,
-    cancelled_tasks: std::collections::HashSet<String>,
+    cancellations: Arc<Mutex<std::collections::HashMap<String, CancellationToken>>>,
+    semaphore: Arc<Semaphore>,
 }
 
 impl TaskWorker {
@@ -37,7 +40,16 @@ impl TaskWorker {
         progress_tx: broadcast::Sender<ProgressMessage>,
         cancel_rx: tokio::sync::broadcast::Receiver<String>,
     ) -> Self {
-        Self { db, config, task_rx, progress_tx, cancel_rx, cancelled_tasks: std::collections::HashSet::new() }
+        let concurrency = config.task.concurrency.max(1);
+        Self {
+            db,
+            config,
+            task_rx,
+            progress_tx,
+            cancel_rx,
+            cancellations: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            semaphore: Arc::new(Semaphore::new(concurrency)),
+        }
     }
 
     /// 启动 Worker，返回 JoinHandle
@@ -48,54 +60,52 @@ impl TaskWorker {
             loop {
                 tokio::select! {
                     Some(job) = self.task_rx.recv() => {
-                        if self.cancelled_tasks.contains(&job.task_id) {
+                        let token = CancellationToken::new();
+                        if self.cancellations.lock().await.contains_key(&job.task_id) {
                             warn!("任务 {} 已被取消，跳过", job.task_id);
                             continue;
                         }
+                        self.cancellations.lock().await.insert(job.task_id.clone(), token.clone());
                         info!("收到任务: {} (类型: {})", job.task_id, job.task_type);
 
-                        if job.task_type == "website" {
-                            let db = self.db.clone();
-                            let config = self.config.clone();
-                            let progress_tx = self.progress_tx.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) = run_website_task(db, config, progress_tx, job).await {
-                                    error!("任务执行异常: {}", e);
+                        let db = self.db.clone();
+                        let config = self.config.clone();
+                        let progress_tx = self.progress_tx.clone();
+                        let cancellations = self.cancellations.clone();
+                        let semaphore = self.semaphore.clone();
+                        let task_id = job.task_id.clone();
+                        tokio::spawn(async move {
+                            let result = async {
+                                let _permit = semaphore.acquire_owned().await?;
+                                match job.task_type.as_str() {
+                                    "website" => run_website_task(db.clone(), config.clone(), progress_tx.clone(), job, token.clone()).await,
+                                    "video" => run_video_task(db.clone(), config.clone(), progress_tx.clone(), job, token.clone()).await,
+                                    "download" => run_download_task(db.clone(), config.clone(), progress_tx.clone(), job, token.clone()).await,
+                                    "ping" => run_ping_task(db.clone(), config.clone(), progress_tx.clone(), job, token.clone()).await,
+                                    other => anyhow::bail!("不支持的任务类型: {other}"),
                                 }
-                            });
-                        } else if job.task_type == "video" {
-                            let db = self.db.clone();
-                            let config = self.config.clone();
-                            let progress_tx = self.progress_tx.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) = run_video_task(db, config, progress_tx, job).await {
-                                    error!("视频任务执行异常: {}", e);
+                            }.await;
+                            if let Err(e) = result {
+                                error!("任务执行异常: {}", e);
+                                if update_task_status(&db, &task_id, "failed", Some(&e.to_string()))
+                                    .await
+                                    .unwrap_or(false)
+                                {
+                                    let _ = progress_tx.send(ProgressMessage::TaskFailed {
+                                        task_id: task_id.clone(),
+                                        error: e.to_string(),
+                                    });
                                 }
-                            });
-                        } else if job.task_type == "download" {
-                            let db = self.db.clone();
-                            let config = self.config.clone();
-                            let progress_tx = self.progress_tx.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) = run_download_task(db, config, progress_tx, job).await {
-                                    error!("下载任务执行异常: {}", e);
-                                }
-                            });
-                        } else if job.task_type == "ping" {
-                            let db = self.db.clone();
-                            let config = self.config.clone();
-                            let progress_tx = self.progress_tx.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) = run_ping_task(db, config, progress_tx, job).await {
-                                    error!("Ping 任务执行异常: {}", e);
-                                }
-                            });
-                        } else {
-                            warn!("不支持的任务类型: {}", job.task_type);
-                        }
+                            }
+                            cancellations.lock().await.remove(&task_id);
+                        });
                     }
                     result = self.cancel_rx.recv() => match result {
-                        Ok(tid) => { self.cancelled_tasks.insert(tid); }
+                        Ok(tid) => {
+                            if let Some(token) = self.cancellations.lock().await.get(&tid) {
+                                token.cancel();
+                            }
+                        }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                             info!("取消广播通道已关闭");
                             break;
@@ -108,7 +118,6 @@ impl TaskWorker {
             info!("TaskWorker 已停止");
         })
     }
-
 }
 
 /// 执行网站测试任务
@@ -117,55 +126,132 @@ async fn run_website_task(
     config: Arc<AppConfig>,
     progress_tx: broadcast::Sender<ProgressMessage>,
     job: TaskJob,
+    cancel: CancellationToken,
 ) -> anyhow::Result<()> {
     let task_id = &job.task_id;
     let total = job.urls.len();
     let timeout = Duration::from_secs(config.task.timeout_seconds);
     let repeat_count = parse_repeat_count(&job.options);
 
-    update_task_status(&db, task_id, "running", None).await?;
+    if !claim_task_running(&db, task_id).await? {
+        return Ok(());
+    }
 
-    let _ = progress_tx.send(ProgressMessage::TaskStarted { task_id: task_id.clone(), total_urls: total });
-    log_progress(&db, &progress_tx, task_id, "info", &format!("开始测试 {} 个URL (重复 {} 次)", total, repeat_count));
+    let _ = progress_tx.send(ProgressMessage::TaskStarted {
+        task_id: task_id.clone(),
+        total_urls: total,
+    });
+    log_progress(
+        &db,
+        &progress_tx,
+        task_id,
+        "info",
+        &format!("开始测试 {} 个URL (重复 {} 次)", total, repeat_count),
+    );
 
     let mut success_count = 0usize;
     let mut fail_count = 0usize;
 
     for (i, url) in job.urls.iter().enumerate() {
-        let _ = progress_tx.send(ProgressMessage::UrlTesting { task_id: task_id.clone(), url: url.clone(), current: i + 1, total });
-        log_progress(&db, &progress_tx, task_id, "info", &format!("正在测试: {}", url));
+        if is_cancelled(&db, task_id, &cancel).await? {
+            return Ok(());
+        }
+        let _ = progress_tx.send(ProgressMessage::UrlTesting {
+            task_id: task_id.clone(),
+            url: url.clone(),
+            current: i + 1,
+            total,
+        });
+        log_progress(
+            &db,
+            &progress_tx,
+            task_id,
+            "info",
+            &format!("正在测试: {}", url),
+        );
 
         match test_website_url(&db, &config, task_id, url, timeout, repeat_count).await {
             Ok(result) => {
+                if is_cancelled(&db, task_id, &cancel).await? {
+                    return Ok(());
+                }
                 success_count += 1;
-                let _ = progress_tx.send(ProgressMessage::UrlCompleted { task_id: task_id.clone(), url: url.clone(), result: result.clone() });
+                let _ = progress_tx.send(ProgressMessage::UrlCompleted {
+                    task_id: task_id.clone(),
+                    url: url.clone(),
+                    result: result.clone(),
+                });
             }
             Err(e) => {
+                if is_cancelled(&db, task_id, &cancel).await? {
+                    return Ok(());
+                }
                 fail_count += 1;
-                log_progress(&db, &progress_tx, task_id, "error", &format!("测试失败 {}: {}", url, e));
+                log_progress(
+                    &db,
+                    &progress_tx,
+                    task_id,
+                    "error",
+                    &format!("测试失败 {}: {}", url, e),
+                );
                 let failed_result = WebsiteResult {
-                    id: Uuid::new_v4().to_string(), task_id: task_id.clone(), url: url.clone(),
-                    dns_time_ms: None, dns_success: None, tcp_time_ms: None, tls_time_ms: None,
-                    http_status: None, ttfb_ms: None, fp_ms: None, fcp_ms: None,
-                    dom_content_loaded_ms: None, load_event_ms: None, page_open_time_ms: None,
-                    first_paint_ms: None, resource_count: None, resource_total_size: None,
-                    final_url: None, page_title: None, screenshot_path: None,
+                    id: Uuid::new_v4().to_string(),
+                    task_id: task_id.clone(),
+                    url: url.clone(),
+                    dns_time_ms: None,
+                    dns_success: None,
+                    tcp_time_ms: None,
+                    tls_time_ms: None,
+                    http_status: None,
+                    ttfb_ms: None,
+                    fp_ms: None,
+                    fcp_ms: None,
+                    dom_content_loaded_ms: None,
+                    load_event_ms: None,
+                    page_open_time_ms: None,
+                    first_paint_ms: None,
+                    resource_count: None,
+                    resource_total_size: None,
+                    final_url: None,
+                    page_title: None,
+                    screenshot_path: None,
                     error_msg: Some(e.to_string()),
-                    html_size: None, css_size: None, js_size: None, image_size: None, font_size: None,
-                    total_requests: None, failed_requests: None,
-                    lcp_ms: None, cls: None, tti_ms: None,
-                    site_size_kb: None, avg_speed_kbps: None, total_speed_kbps: None, first_screen_ratio: None,
-                    created_at: Utc::now().to_rfc3339(), test_count: Some(repeat_count as i32),
+                    html_size: None,
+                    css_size: None,
+                    js_size: None,
+                    image_size: None,
+                    font_size: None,
+                    total_requests: None,
+                    failed_requests: None,
+                    lcp_ms: None,
+                    cls: None,
+                    tti_ms: None,
+                    site_size_kb: None,
+                    avg_speed_kbps: None,
+                    total_speed_kbps: None,
+                    first_screen_ratio: None,
+                    created_at: Utc::now().to_rfc3339(),
+                    test_count: Some(repeat_count as i32),
                 };
                 save_website_result(&db, &failed_result).await.ok();
             }
         }
         let progress = ((i + 1) as f64 / total as f64 * 100.0);
-        let _ = progress_tx.send(ProgressMessage::ProgressUpdate { task_id: task_id.clone(), progress });
+        let _ = progress_tx.send(ProgressMessage::ProgressUpdate {
+            task_id: task_id.clone(),
+            progress,
+        });
         update_task_progress(&db, task_id, progress).await.ok();
     }
 
-    let _ = progress_tx.send(ProgressMessage::TaskCompleted { task_id: task_id.clone(), success_count, fail_count });
+    if is_cancelled(&db, task_id, &cancel).await? {
+        return Ok(());
+    }
+    let _ = progress_tx.send(ProgressMessage::TaskCompleted {
+        task_id: task_id.clone(),
+        success_count,
+        fail_count,
+    });
     update_task_progress(&db, task_id, 100.0).await.ok();
     update_task_status(&db, task_id, "completed", None).await?;
     Ok(())
@@ -174,24 +260,34 @@ async fn run_website_task(
 /// 测试单个 URL
 /// 从 job options 中提取 repeat_count，默认 1
 fn parse_repeat_count(options: &serde_json::Value) -> usize {
-    options.get("repeat_count")
+    options
+        .get("repeat_count")
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)
         .unwrap_or(1)
-        .max(1)
+        .clamp(1, 100)
 }
 
 /// 从 job options 中提取启用的指标集合
 fn parse_metrics(options: &serde_json::Value) -> Vec<String> {
-    options.get("metrics")
+    options
+        .get("metrics")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_else(|| vec!["basic".into(), "page".into(), "resource".into()])
 }
 
 /// 从 job options 中提取 ping_count，默认 10
 fn parse_ping_count(options: &serde_json::Value) -> u32 {
-    options.get("ping_count").and_then(|v| v.as_u64()).map(|v| v as u32).unwrap_or(10)
+    options
+        .get("ping_count")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32)
+        .unwrap_or(10)
 }
 
 /// 检查是否启用了某类指标
@@ -237,45 +333,98 @@ async fn test_website_url(
     let mut last_error: Option<String> = None;
 
     for _ in 0..repeat_count {
+        crate::utils::url::validate_url_safety(url, timeout)
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
         let dns = DnsEngine::resolve(url).await?;
         dns_times.push(dns.dns_time_ms);
-        if dns.dns_success { dns_ok += 1; }
+        if dns.dns_success {
+            dns_ok += 1;
+        }
 
         let http = HttpEngine::probe(url, timeout).await;
         tcp_times.push(http.tcp_time_ms);
         tls_times.push(http.tls_time_ms);
         ttfb_times.push(http.ttfb_ms);
-        if let Some(s) = http.http_status { http_statuses.push(s); }
-        if final_url.is_none() { final_url = Some(http.final_url.clone()); }
+        if let Some(s) = http.http_status {
+            http_statuses.push(s);
+        }
+        if final_url.is_none() {
+            final_url = Some(http.final_url.clone());
+        }
 
         let browser_engine = BrowserEngine::new(config.browser.clone(), timeout);
         let browser = browser_engine.test_page(url).await;
-        if let Some(v) = browser.fp_ms { fp_times.push(v); }
-        if let Some(v) = browser.fcp_ms { fcp_times.push(v); }
-        if let Some(v) = browser.dom_content_loaded_ms { dcl_times.push(v); }
-        if let Some(v) = browser.load_event_ms { load_times.push(v); }
-        if let Some(v) = browser.page_open_time_ms { page_open_times.push(v); }
-        if let Some(v) = browser.resource_count { resource_counts.push(v); }
-        if let Some(v) = browser.resource_total_size { resource_sizes.push(v); }
-        if let Some(v) = browser.html_size { html_sizes.push(v); }
-        if let Some(v) = browser.css_size { css_sizes.push(v); }
-        if let Some(v) = browser.js_size { js_sizes.push(v); }
-        if let Some(v) = browser.image_size { image_sizes.push(v); }
-        if let Some(v) = browser.font_size { font_sizes.push(v); }
-        if let Some(v) = browser.total_requests { total_reqs.push(v); }
-        if let Some(v) = browser.failed_requests { failed_reqs.push(v); }
-        if let Some(v) = browser.lcp_ms { lcp_times.push(v); }
-        if let Some(v) = browser.site_size_kb { site_sizes_kb.push(v); }
-        if let Some(v) = browser.avg_speed_kbps { avg_speeds.push(v); }
-        if page_title.is_none() { page_title = browser.page_title.clone(); }
+        if let Some(v) = browser.fp_ms {
+            fp_times.push(v);
+        }
+        if let Some(v) = browser.fcp_ms {
+            fcp_times.push(v);
+        }
+        if let Some(v) = browser.dom_content_loaded_ms {
+            dcl_times.push(v);
+        }
+        if let Some(v) = browser.load_event_ms {
+            load_times.push(v);
+        }
+        if let Some(v) = browser.page_open_time_ms {
+            page_open_times.push(v);
+        }
+        if let Some(v) = browser.resource_count {
+            resource_counts.push(v);
+        }
+        if let Some(v) = browser.resource_total_size {
+            resource_sizes.push(v);
+        }
+        if let Some(v) = browser.html_size {
+            html_sizes.push(v);
+        }
+        if let Some(v) = browser.css_size {
+            css_sizes.push(v);
+        }
+        if let Some(v) = browser.js_size {
+            js_sizes.push(v);
+        }
+        if let Some(v) = browser.image_size {
+            image_sizes.push(v);
+        }
+        if let Some(v) = browser.font_size {
+            font_sizes.push(v);
+        }
+        if let Some(v) = browser.total_requests {
+            total_reqs.push(v);
+        }
+        if let Some(v) = browser.failed_requests {
+            failed_reqs.push(v);
+        }
+        if let Some(v) = browser.lcp_ms {
+            lcp_times.push(v);
+        }
+        if let Some(v) = browser.site_size_kb {
+            site_sizes_kb.push(v);
+        }
+        if let Some(v) = browser.avg_speed_kbps {
+            avg_speeds.push(v);
+        }
+        if page_title.is_none() {
+            page_title = browser.page_title.clone();
+        }
 
         if screenshot_path.is_none() {
             if let Some(ref data) = browser.screenshot {
-                screenshot_path = StorageManager::save_screenshot(&config.storage.screenshot_dir, task_id, url, data).ok();
+                screenshot_path = StorageManager::save_screenshot(
+                    &config.storage.screenshot_dir,
+                    task_id,
+                    url,
+                    data,
+                )
+                .ok();
             }
         }
 
-        if let Some(ref e) = browser.error { last_error = Some(e.clone()); }
+        if let Some(ref e) = browser.error {
+            last_error = Some(e.clone());
+        }
     }
 
     let result = WebsiteResult {
@@ -283,7 +432,11 @@ async fn test_website_url(
         task_id: task_id.to_string(),
         url: url.to_string(),
         dns_time_ms: avg(&dns_times),
-        dns_success: Some(if repeat_count > 0 { (dns_ok * 100 / repeat_count) as i32 } else { 0 }),
+        dns_success: Some(if repeat_count > 0 {
+            (dns_ok * 100 / repeat_count) as i32
+        } else {
+            0
+        }),
         tcp_time_ms: avg(&tcp_times),
         tls_time_ms: avg(&tls_times),
         http_status: http_statuses.last().copied(),
@@ -324,11 +477,19 @@ async fn test_website_url(
 
 /// 向量取平均
 fn avg(v: &[f64]) -> Option<f64> {
-    if v.is_empty() { None } else { Some(v.iter().sum::<f64>() / v.len() as f64) }
+    if v.is_empty() {
+        None
+    } else {
+        Some(v.iter().sum::<f64>() / v.len() as f64)
+    }
 }
 
 fn avg_i32(v: &[i32]) -> Option<i32> {
-    if v.is_empty() { None } else { Some((v.iter().map(|&x| x as f64).sum::<f64>() / v.len() as f64).round() as i32) }
+    if v.is_empty() {
+        None
+    } else {
+        Some((v.iter().map(|&x| x as f64).sum::<f64>() / v.len() as f64).round() as i32)
+    }
 }
 
 /// 保存网站测试结果到数据库
@@ -390,43 +551,70 @@ async fn update_task_status(
     task_id: &str,
     status: &str,
     error_msg: Option<&str>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let now = Utc::now().to_rfc3339();
     match status {
         "running" => {
-            sqlx::query("UPDATE test_task SET status = ?, started_at = ? WHERE id = ?")
+            let result = sqlx::query("UPDATE test_task SET status = ?, started_at = ? WHERE id = ? AND status = 'pending'")
                 .bind(status)
                 .bind(&now)
                 .bind(task_id)
                 .execute(db)
                 .await?;
+            return Ok(result.rows_affected() == 1);
         }
         "completed" | "failed" | "cancelled" => {
-            sqlx::query("UPDATE test_task SET status = ?, finished_at = ?, error_msg = ? WHERE id = ?")
-                .bind(status)
-                .bind(&now)
-                .bind(error_msg)
-                .bind(task_id)
-                .execute(db)
-                .await?;
+            let result = sqlx::query(
+                "UPDATE test_task SET status = ?, finished_at = ?, error_msg = ? WHERE id = ? AND status = 'running'",
+            )
+            .bind(status)
+            .bind(&now)
+            .bind(error_msg)
+            .bind(task_id)
+            .execute(db)
+            .await?;
+            return Ok(result.rows_affected() == 1);
         }
         _ => {
-            sqlx::query("UPDATE test_task SET status = ? WHERE id = ?")
+            let result = sqlx::query("UPDATE test_task SET status = ? WHERE id = ?")
                 .bind(status)
                 .bind(task_id)
                 .execute(db)
                 .await?;
+            return Ok(result.rows_affected() == 1);
         }
     }
-    Ok(())
+}
+
+async fn claim_task_running(db: &SqlitePool, task_id: &str) -> anyhow::Result<bool> {
+    let now = Utc::now().to_rfc3339();
+    let result = sqlx::query(
+        "UPDATE test_task SET status = 'running', started_at = ? WHERE id = ? AND status = 'pending'",
+    )
+    .bind(now)
+    .bind(task_id)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+async fn is_cancelled(
+    db: &SqlitePool,
+    task_id: &str,
+    token: &CancellationToken,
+) -> anyhow::Result<bool> {
+    if token.is_cancelled() {
+        return Ok(true);
+    }
+    let status: Option<String> = sqlx::query_scalar("SELECT status FROM test_task WHERE id = ?")
+        .bind(task_id)
+        .fetch_optional(db)
+        .await?;
+    Ok(status.as_deref() != Some("running"))
 }
 
 /// 更新任务进度
-async fn update_task_progress(
-    db: &SqlitePool,
-    task_id: &str,
-    progress: f64,
-) -> anyhow::Result<()> {
+async fn update_task_progress(db: &SqlitePool, task_id: &str, progress: f64) -> anyhow::Result<()> {
     sqlx::query("UPDATE test_task SET progress = ? WHERE id = ?")
         .bind(progress)
         .bind(task_id)
@@ -465,10 +653,17 @@ fn log_progress(
     let tid = tid.clone();
     tokio::spawn(async move {
         let now = chrono::Utc::now().to_rfc3339();
-        let _ = sqlx::query("INSERT INTO task_log (id, task_id, level, message, created_at) VALUES (?, ?, ?, ?, ?)")
-            .bind(uuid::Uuid::new_v4().to_string())
-            .bind(&tid).bind(&level_str).bind(&msg).bind(&now)
-            .execute(&db).await;
+        let _ = sqlx::query(
+            "INSERT INTO task_log (id, task_id, level, message, created_at) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM test_task WHERE id = ?)",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(&tid)
+        .bind(&level_str)
+        .bind(&msg)
+        .bind(&now)
+        .bind(&tid)
+        .execute(&db)
+        .await;
     });
 }
 
@@ -480,23 +675,35 @@ async fn run_video_task(
     config: Arc<AppConfig>,
     progress_tx: broadcast::Sender<ProgressMessage>,
     job: TaskJob,
+    cancel: CancellationToken,
 ) -> anyhow::Result<()> {
     let task_id = &job.task_id;
     let total = job.urls.len();
 
-    update_task_status(&db, task_id, "running", None).await?;
+    if !claim_task_running(&db, task_id).await? {
+        return Ok(());
+    }
 
     let _ = progress_tx.send(ProgressMessage::TaskStarted {
         task_id: task_id.clone(),
         total_urls: total,
     });
 
-    log_progress(&db, &progress_tx, task_id, "info", &format!("开始视频测试 {} 个URL", total));
+    log_progress(
+        &db,
+        &progress_tx,
+        task_id,
+        "info",
+        &format!("开始视频测试 {} 个URL", total),
+    );
 
     let mut success_count = 0usize;
     let mut fail_count = 0usize;
 
     for (i, url) in job.urls.iter().enumerate() {
+        if is_cancelled(&db, task_id, &cancel).await? {
+            return Ok(());
+        }
         let _ = progress_tx.send(ProgressMessage::UrlTesting {
             task_id: task_id.clone(),
             url: url.clone(),
@@ -504,10 +711,19 @@ async fn run_video_task(
             total,
         });
 
-        log_progress(&db, &progress_tx, task_id, "info", &format!("视频测试: {}", url));
+        log_progress(
+            &db,
+            &progress_tx,
+            task_id,
+            "info",
+            &format!("视频测试: {}", url),
+        );
 
         match test_single_video(&db, &config, task_id, url).await {
             Ok(result) => {
+                if is_cancelled(&db, task_id, &cancel).await? {
+                    return Ok(());
+                }
                 success_count += 1;
                 let _ = progress_tx.send(ProgressMessage::UrlCompleted {
                     task_id: task_id.clone(),
@@ -530,10 +746,20 @@ async fn run_video_task(
                         first_paint_ms: None,
                         resource_count: None,
                         resource_total_size: result.video_size,
-                        html_size: None, css_size: None, js_size: None, image_size: None, font_size: None,
-                        total_requests: None, failed_requests: None,
-                        lcp_ms: None, cls: None, tti_ms: None,
-                        site_size_kb: None, avg_speed_kbps: None, total_speed_kbps: None, first_screen_ratio: None,
+                        html_size: None,
+                        css_size: None,
+                        js_size: None,
+                        image_size: None,
+                        font_size: None,
+                        total_requests: None,
+                        failed_requests: None,
+                        lcp_ms: None,
+                        cls: None,
+                        tti_ms: None,
+                        site_size_kb: None,
+                        avg_speed_kbps: None,
+                        total_speed_kbps: None,
+                        first_screen_ratio: None,
                         final_url: None,
                         page_title: result.page_title.clone(),
                         screenshot_path: result.screenshot_path.clone(),
@@ -544,8 +770,17 @@ async fn run_video_task(
                 });
             }
             Err(e) => {
+                if is_cancelled(&db, task_id, &cancel).await? {
+                    return Ok(());
+                }
                 fail_count += 1;
-                log_progress(&db, &progress_tx, task_id, "error", &format!("视频测试失败 {}: {}", url, e));
+                log_progress(
+                    &db,
+                    &progress_tx,
+                    task_id,
+                    "error",
+                    &format!("视频测试失败 {}: {}", url, e),
+                );
 
                 let failed_result = VideoResult {
                     id: Uuid::new_v4().to_string(),
@@ -570,9 +805,13 @@ async fn run_video_task(
                     page_title: None,
                     error_msg: Some(e.to_string()),
                     trigger_method: None,
-                    stutter_count: None, stutter_duration_ms: None,
-                    play_duration_sec: None, stutter_ratio: None,
-                    video_width: None, video_height: None, video_duration_sec: None,
+                    stutter_count: None,
+                    stutter_duration_ms: None,
+                    play_duration_sec: None,
+                    stutter_ratio: None,
+                    video_width: None,
+                    video_height: None,
+                    video_duration_sec: None,
                     created_at: Utc::now().to_rfc3339(),
                     test_count: None,
                 };
@@ -588,6 +827,9 @@ async fn run_video_task(
         update_task_progress(&db, task_id, progress).await.ok();
     }
 
+    if is_cancelled(&db, task_id, &cancel).await? {
+        return Ok(());
+    }
     let _ = progress_tx.send(ProgressMessage::TaskCompleted {
         task_id: task_id.clone(),
         success_count,
@@ -619,17 +861,16 @@ async fn test_single_video(
 
     let platform_cfg = match_platform(&config.video_platforms, url);
     let timeout = Duration::from_secs(config.task.timeout_seconds);
-    let video_engine = VideoEngine::new(&config.video_browser.path, config.video_browser.headless, timeout);
+    let video_engine = VideoEngine::new(
+        &config.video_browser.path,
+        config.video_browser.headless,
+        timeout,
+    );
     let video_result = video_engine.test_page(url, &platform_cfg).await;
 
     // 保存截图
     let screenshot_path = if let Some(data) = &video_result.screenshot {
-        match StorageManager::save_screenshot(
-            &config.storage.screenshot_dir,
-            task_id,
-            url,
-            data,
-        ) {
+        match StorageManager::save_screenshot(&config.storage.screenshot_dir, task_id, url, data) {
             Ok(path) => Some(path),
             Err(e) => {
                 warn!("视频截图保存失败: {}", e);
@@ -733,26 +974,53 @@ async fn run_download_task(
     config: Arc<AppConfig>,
     progress_tx: broadcast::Sender<ProgressMessage>,
     job: TaskJob,
+    cancel: CancellationToken,
 ) -> anyhow::Result<()> {
     let task_id = &job.task_id;
     let total = job.urls.len();
     let timeout = Duration::from_secs(config.task.timeout_seconds);
 
-    update_task_status(&db, task_id, "running", None).await?;
-    let _ = progress_tx.send(ProgressMessage::TaskStarted { task_id: task_id.clone(), total_urls: total });
-    log_progress(&db, &progress_tx, task_id, "info", &format!("开始下载测试 {} 个URL", total));
+    if !claim_task_running(&db, task_id).await? {
+        return Ok(());
+    }
+    let _ = progress_tx.send(ProgressMessage::TaskStarted {
+        task_id: task_id.clone(),
+        total_urls: total,
+    });
+    log_progress(
+        &db,
+        &progress_tx,
+        task_id,
+        "info",
+        &format!("开始下载测试 {} 个URL", total),
+    );
 
     let mut success_count = 0usize;
     let mut fail_count = 0usize;
 
     for (i, url) in job.urls.iter().enumerate() {
+        if is_cancelled(&db, task_id, &cancel).await? {
+            return Ok(());
+        }
         let _ = progress_tx.send(ProgressMessage::UrlTesting {
-            task_id: task_id.clone(), url: url.clone(), current: i + 1, total,
+            task_id: task_id.clone(),
+            url: url.clone(),
+            current: i + 1,
+            total,
         });
-        log_progress(&db, &progress_tx, task_id, "info", &format!("下载测试: {}", url));
+        log_progress(
+            &db,
+            &progress_tx,
+            task_id,
+            "info",
+            &format!("下载测试: {}", url),
+        );
 
         let engine = DownloadEngine::new(timeout);
         let result = engine.test_download(url).await;
+        if is_cancelled(&db, task_id, &cancel).await? {
+            return Ok(());
+        }
 
         let now = Utc::now().to_rfc3339();
         let dl = DownloadResult {
@@ -770,22 +1038,40 @@ async fn run_download_task(
             success: Some(if result.success { 1 } else { 0 }),
             error_msg: result.error.clone(),
             created_at: now,
-        test_count: None,
+            test_count: None,
         };
 
         save_download_result(&db, &dl).await?;
 
-        if result.success { success_count += 1; } else { fail_count += 1; }
+        if result.success {
+            success_count += 1;
+        } else {
+            fail_count += 1;
+        }
 
         let progress = ((i + 1) as f64 / total as f64) * 100.0;
-        let _ = progress_tx.send(ProgressMessage::ProgressUpdate { task_id: task_id.clone(), progress });
+        let _ = progress_tx.send(ProgressMessage::ProgressUpdate {
+            task_id: task_id.clone(),
+            progress,
+        });
         update_task_progress(&db, task_id, progress).await.ok();
     }
 
+    if is_cancelled(&db, task_id, &cancel).await? {
+        return Ok(());
+    }
     let _ = progress_tx.send(ProgressMessage::TaskCompleted {
-        task_id: task_id.clone(), success_count, fail_count,
+        task_id: task_id.clone(),
+        success_count,
+        fail_count,
     });
-    log_progress(&db, &progress_tx, task_id, "info", &format!("下载任务完成: 成功{}, 失败{}", success_count, fail_count));
+    log_progress(
+        &db,
+        &progress_tx,
+        task_id,
+        "info",
+        &format!("下载任务完成: 成功{}, 失败{}", success_count, fail_count),
+    );
     update_task_status(&db, task_id, "completed", None).await?;
 
     Ok(())
@@ -811,26 +1097,50 @@ async fn run_ping_task(
     config: Arc<AppConfig>,
     progress_tx: broadcast::Sender<ProgressMessage>,
     job: TaskJob,
+    cancel: CancellationToken,
 ) -> anyhow::Result<()> {
     let task_id = &job.task_id;
     let total = job.urls.len();
     let timeout = Duration::from_secs(config.task.timeout_seconds);
     let ping_count = parse_ping_count(&job.options);
 
-    update_task_status(&db, task_id, "running", None).await?;
-    let _ = progress_tx.send(ProgressMessage::TaskStarted { task_id: task_id.clone(), total_urls: total });
-    log_progress(&db, &progress_tx, task_id, "info", &format!("开始 Ping 测试 {} 个目标 (每目标 {} 个包)", total, ping_count));
+    if !claim_task_running(&db, task_id).await? {
+        return Ok(());
+    }
+    let _ = progress_tx.send(ProgressMessage::TaskStarted {
+        task_id: task_id.clone(),
+        total_urls: total,
+    });
+    log_progress(
+        &db,
+        &progress_tx,
+        task_id,
+        "info",
+        &format!(
+            "开始 Ping 测试 {} 个目标 (每目标 {} 个包)",
+            total, ping_count
+        ),
+    );
 
     let mut success_count = 0usize;
     let mut fail_count = 0usize;
 
     for (i, host) in job.urls.iter().enumerate() {
+        if is_cancelled(&db, task_id, &cancel).await? {
+            return Ok(());
+        }
         let _ = progress_tx.send(ProgressMessage::UrlTesting {
-            task_id: task_id.clone(), url: host.clone(), current: i + 1, total,
+            task_id: task_id.clone(),
+            url: host.clone(),
+            current: i + 1,
+            total,
         });
 
         let engine = PingEngine::new(ping_count, timeout);
         let result = engine.test_ping(host).await;
+        if is_cancelled(&db, task_id, &cancel).await? {
+            return Ok(());
+        }
 
         let now = Utc::now().to_rfc3339();
         let pr = PingResult {
@@ -849,15 +1159,27 @@ async fn run_ping_task(
 
         save_ping_result(&db, &pr).await?;
 
-        if result.success { success_count += 1; } else { fail_count += 1; }
+        if result.success {
+            success_count += 1;
+        } else {
+            fail_count += 1;
+        }
 
         let progress = ((i + 1) as f64 / total as f64) * 100.0;
-        let _ = progress_tx.send(ProgressMessage::ProgressUpdate { task_id: task_id.clone(), progress });
+        let _ = progress_tx.send(ProgressMessage::ProgressUpdate {
+            task_id: task_id.clone(),
+            progress,
+        });
         update_task_progress(&db, task_id, progress).await.ok();
     }
 
+    if is_cancelled(&db, task_id, &cancel).await? {
+        return Ok(());
+    }
     let _ = progress_tx.send(ProgressMessage::TaskCompleted {
-        task_id: task_id.clone(), success_count, fail_count,
+        task_id: task_id.clone(),
+        success_count,
+        fail_count,
     });
     update_task_status(&db, task_id, "completed", None).await?;
     Ok(())

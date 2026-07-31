@@ -9,10 +9,10 @@ use tracing::{debug, info};
 pub struct PingTestResult {
     pub host: String,
     pub avg_latency_ms: f64,
-    pub packet_loss_rate: f64,  // 0-100
+    pub packet_loss_rate: f64, // 0-100
     pub jitter_ms: f64,
     pub success: bool,
-    pub method: Option<String>,  // "icmp" | "tcp80" | "tcp443"
+    pub method: Option<String>, // "icmp" | "tcp80" | "tcp443"
     pub error: Option<String>,
 }
 
@@ -24,7 +24,10 @@ pub struct PingEngine {
 
 impl PingEngine {
     pub fn new(count: u32, timeout: Duration) -> Self {
-        Self { count: count.max(1).min(100), timeout }
+        Self {
+            count: count.max(1).min(100),
+            timeout,
+        }
     }
 
     /// 执行 ping 测试（ICMP → TCP:80 → TCP:443 三级回退）
@@ -47,15 +50,24 @@ impl PingEngine {
         let count = self.count;
         let timeout_secs = self.timeout.as_secs();
         let icmp_target = target.clone();
-        let icmp_result = tokio::task::spawn_blocking(move || {
-            run_ping(&icmp_target, count, timeout_secs)
-        }).await;
+        let icmp_result = tokio::time::timeout(
+            self.timeout + Duration::from_secs(1),
+            tokio::task::spawn_blocking(move || run_ping(&icmp_target, count, timeout_secs)),
+        )
+        .await;
 
         match icmp_result {
-            Ok(Ok(mut r)) if r.success => { r.method = Some("icmp".into()); return r; }
-            Ok(Ok(r)) => info!("ICMP 不通 {} (丢包{}%, rtts=0), 回退 TCP", r.host, r.packet_loss_rate),
-            Ok(Err(e)) => info!("ICMP 失败 {}, 回退 TCP", e),
-            Err(e) => info!("ICMP 异常 {}, 回退 TCP", e),
+            Ok(Ok(Ok(mut r))) if r.success => {
+                r.method = Some("icmp".into());
+                return r;
+            }
+            Ok(Ok(Ok(r))) => info!(
+                "ICMP 不通 {} (丢包{}%, rtts=0), 回退 TCP",
+                r.host, r.packet_loss_rate
+            ),
+            Ok(Ok(Err(e))) => info!("ICMP 失败 {}, 回退 TCP", e),
+            Ok(Err(e)) => info!("ICMP 异常 {}, 回退 TCP", e),
+            Err(_) => info!("ICMP 超时, 回退 TCP"),
         }
 
         // 2. TCP :80
@@ -94,7 +106,7 @@ fn run_ping(host: &str, count: u32, timeout_secs: u64) -> Result<PingTestResult,
         .arg("-W")
         .arg((timeout_secs.max(1)).to_string())
         .arg("-i")
-        .arg("0.5")  // 间隔 0.5 秒
+        .arg("0.5") // 间隔 0.5 秒
         .arg(host)
         .output()
         .map_err(|e| format!("执行 ping 失败: {}", e))?;
@@ -146,11 +158,16 @@ fn run_ping(host: &str, count: u32, timeout_secs: u64) -> Result<PingTestResult,
             if let Some(stats_part) = line.split('=').nth(1) {
                 let nums: Vec<f64> = stats_part
                     .split('/')
-                    .filter_map(|s| s.trim().split_whitespace().next().and_then(|n| n.parse().ok()))
+                    .filter_map(|s| {
+                        s.trim()
+                            .split_whitespace()
+                            .next()
+                            .and_then(|n| n.parse().ok())
+                    })
                     .collect();
                 if nums.len() >= 4 {
-                    avg_latency = nums[1];  // avg
-                    jitter = nums[3];       // mdev (mean deviation)
+                    avg_latency = nums[1]; // avg
+                    jitter = nums[3]; // mdev (mean deviation)
                 }
             }
         }
@@ -174,13 +191,17 @@ fn run_ping(host: &str, count: u32, timeout_secs: u64) -> Result<PingTestResult,
         jitter_ms: (jitter * 1000.0).round() / 1000.0,
         success,
         method: Some("icmp".into()),
-        error: if success { None } else { Some("100% 丢包".to_string()) },
+        error: if success {
+            None
+        } else {
+            Some("100% 丢包".to_string())
+        },
     })
 }
 
 /// TCP Ping: 连接指定端口，连 N 次取平均延迟
 async fn run_tcp_ping(host: &str, port: u16, count: u32) -> PingTestResult {
-    let addr = format!("{}:{}", host, port);
+    let addr = format_socket_addr(host, port);
     let method = format!("tcp{}", port);
     let mut times: Vec<f64> = Vec::new();
     let mut fails = 0u32;
@@ -193,18 +214,39 @@ async fn run_tcp_ping(host: &str, port: u16, count: u32) -> PingTestResult {
                 times.push(start.elapsed().as_secs_f64() * 1000.0);
                 drop(stream);
             }
-            Ok(Err(e)) => { fails += 1; last_err = e.to_string(); }
-            Err(_timeout) => { fails += 1; last_err = "timeout".into(); }
+            Ok(Err(e)) => {
+                fails += 1;
+                last_err = e.to_string();
+            }
+            Err(_timeout) => {
+                fails += 1;
+                last_err = "timeout".into();
+            }
         }
     }
 
-    info!("TCP ping {}:{} 结果: {}/{} 成功, 时延={:?}ms, err={}", host, port, times.len(), count,
-        if times.is_empty() { None } else { Some(times.iter().sum::<f64>() / times.len() as f64) }, last_err);
+    info!(
+        "TCP ping {}:{} 结果: {}/{} 成功, 时延={:?}ms, err={}",
+        host,
+        port,
+        times.len(),
+        count,
+        if times.is_empty() {
+            None
+        } else {
+            Some(times.iter().sum::<f64>() / times.len() as f64)
+        },
+        last_err
+    );
 
     if times.is_empty() {
         return PingTestResult {
-            host: host.to_string(), avg_latency_ms: 0.0, packet_loss_rate: 100.0,
-            jitter_ms: 0.0, success: false, method: Some(method),
+            host: host.to_string(),
+            avg_latency_ms: 0.0,
+            packet_loss_rate: 100.0,
+            jitter_ms: 0.0,
+            success: false,
+            method: Some(method),
             error: Some(format!("TCP:{} {}, {}次全失败", port, last_err, count)),
         };
     }
@@ -214,7 +256,9 @@ async fn run_tcp_ping(host: &str, port: u16, count: u32) -> PingTestResult {
     let jitter = if times.len() > 1 {
         let variance = times.iter().map(|t| (t - avg).powi(2)).sum::<f64>() / times.len() as f64;
         variance.sqrt()
-    } else { 0.0 };
+    } else {
+        0.0
+    };
 
     PingTestResult {
         host: host.to_string(),
@@ -223,19 +267,32 @@ async fn run_tcp_ping(host: &str, port: u16, count: u32) -> PingTestResult {
         jitter_ms: (jitter * 1000.0).round() / 1000.0,
         success: loss < 100.0,
         method: Some(method),
-        error: if loss >= 100.0 { Some(format!("TCP:{} 全部超时或拒绝", port)) } else { None },
+        error: if loss >= 100.0 {
+            Some(format!("TCP:{} 全部超时或拒绝", port))
+        } else {
+            None
+        },
     }
 }
 
 /// 验证 hostname 是否合法（仅允许域名、IPv4、IPv6）
 fn validate_hostname(host: &str) -> bool {
     // 允许字母数字、点、冒号、短横线、下划线（用于 SRV 记录）
-    !host.is_empty() && host.chars().all(|c| c.is_alphanumeric() || c == '.' || c == ':' || c == '-' || c == '_')
+    !host.is_empty()
+        && host
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '.' || c == ':' || c == '-' || c == '_')
 }
 
 /// 从 URL 提取主机名
 fn extract_host(input: &str) -> String {
     let input = input.trim();
+    if let Some(host) = url::Url::parse(input)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+    {
+        return host;
+    }
     let after_protocol = input.split("://").nth(1).unwrap_or(input);
     let after_path = after_protocol.split('/').next().unwrap_or(after_protocol);
     // 处理 IPv6: 优先从方括号中提取
@@ -244,7 +301,22 @@ fn extract_host(input: &str) -> String {
             return host.to_string();
         }
     }
-    after_path.split(':').next().unwrap_or(after_path).to_string()
+    if after_path.parse::<std::net::IpAddr>().is_ok() {
+        return after_path.to_string();
+    }
+    after_path
+        .split(':')
+        .next()
+        .unwrap_or(after_path)
+        .to_string()
+}
+
+fn format_socket_addr(host: &str, port: u16) -> String {
+    if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[{}]:{}", host, port)
+    } else {
+        format!("{}:{}", host, port)
+    }
 }
 
 #[cfg(test)]
@@ -253,7 +325,10 @@ mod tests {
 
     #[test]
     fn test_extract_host() {
-        assert_eq!(extract_host("https://www.example.com/path"), "www.example.com");
+        assert_eq!(
+            extract_host("https://www.example.com/path"),
+            "www.example.com"
+        );
         assert_eq!(extract_host("http://example.com:8080"), "example.com");
         assert_eq!(extract_host("8.8.8.8"), "8.8.8.8");
         assert_eq!(extract_host("8.8.8.8:53"), "8.8.8.8");

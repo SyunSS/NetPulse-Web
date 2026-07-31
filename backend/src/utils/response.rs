@@ -189,3 +189,17 @@ pub enum ProgressMessage {
         error: String,
     },
 }
+
+impl ProgressMessage {
+    pub fn task_id(&self) -> &str {
+        match self {
+            Self::TaskStarted { task_id, .. }
+            | Self::UrlTesting { task_id, .. }
+            | Self::UrlCompleted { task_id, .. }
+            | Self::ProgressUpdate { task_id, .. }
+            | Self::Log { task_id, .. }
+            | Self::TaskCompleted { task_id, .. }
+            | Self::TaskFailed { task_id, .. } => task_id,
+        }
+    }
+}

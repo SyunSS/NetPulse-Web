@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tracing::debug;
 
+use crate::utils::url::validate_url_safety;
+
 /// HTTP 探测结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpResult {
@@ -35,6 +37,17 @@ impl HttpEngine {
             }
         };
 
+        if let Err(e) = validate_url_safety(url, timeout).await {
+            return HttpResult {
+                tcp_time_ms: 0.0,
+                tls_time_ms: 0.0,
+                http_status: None,
+                ttfb_ms: 0.0,
+                final_url: url.to_string(),
+                error: Some(format!("URL 安全检查失败: {}", e)),
+            };
+        }
+
         let host = parsed.host_str().unwrap_or("");
         let port = parsed.port_or_known_default().unwrap_or(80);
         let is_https = parsed.scheme() == "https";
@@ -63,8 +76,7 @@ impl HttpEngine {
         };
 
         // 3. 发起 HTTP 请求获取状态码和 TTFB
-        let (http_status, ttfb_ms, final_url) =
-            measure_http_request(url, timeout).await;
+        let (http_status, ttfb_ms, final_url, error) = measure_http_request(url, timeout).await;
 
         HttpResult {
             tcp_time_ms,
@@ -72,7 +84,7 @@ impl HttpEngine {
             http_status,
             ttfb_ms,
             final_url,
-            error: None,
+            error,
         }
     }
 }
@@ -98,7 +110,7 @@ async fn measure_tcp_connect(host: &str, port: u16, timeout: Duration) -> f64 {
 async fn measure_tls_time(host: &str, port: u16, timeout: Duration) -> f64 {
     // 用 reqwest 建立连接并测量总时间，减去预估 TCP 时间
     // 这是一个估算值，因为 reqwest 不暴露细粒度的 timing
-    let url = format!("https://{}:{}/", host, port);
+    let url = format!("https://{}/", format_socket_addr(host, port));
     let client = reqwest::Client::builder()
         .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
@@ -119,28 +131,55 @@ async fn measure_tls_time(host: &str, port: u16, timeout: Duration) -> f64 {
 }
 
 /// 发起 HTTP 请求，获取状态码、TTFB 和最终 URL
-async fn measure_http_request(url: &str, timeout: Duration) -> (Option<i32>, f64, String) {
+async fn measure_http_request(
+    url: &str,
+    timeout: Duration,
+) -> (Option<i32>, f64, String, Option<String>) {
     let client = reqwest::Client::builder()
         .timeout(timeout)
-        .redirect(reqwest::redirect::Policy::limited(5))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap_or_default();
 
     let start = Instant::now();
-    match client.get(url).send().await {
-        Ok(response) => {
-            let ttfb_ms = start.elapsed().as_secs_f64() * 1000.0;
-            let status = response.status().as_u16() as i32;
-            let final_url = response.url().to_string();
-            debug!(
-                "HTTP 请求完成: {} -> {} ({:.2}ms)",
-                url, status, ttfb_ms
-            );
-            (Some(status), ttfb_ms, final_url)
+    let mut current = url.to_string();
+    for _ in 0..=5 {
+        if let Err(e) = validate_url_safety(&current, timeout).await {
+            return (None, 0.0, current, Some(format!("URL 安全检查失败: {}", e)));
         }
-        Err(e) => {
-            debug!("HTTP 请求失败: {} - {}", url, e);
-            (None, 0.0, url.to_string())
+        match client.get(&current).send().await {
+            Ok(response) if response.status().is_redirection() => {
+                let Some(location) = response.headers().get(reqwest::header::LOCATION) else {
+                    return (None, 0.0, current, Some("重定向缺少 Location".into()));
+                };
+                let Ok(location) = location.to_str() else {
+                    return (None, 0.0, current, Some("重定向 Location 无效".into()));
+                };
+                let Ok(next) = response.url().join(location) else {
+                    return (None, 0.0, current, Some("重定向 URL 无效".into()));
+                };
+                current = next.to_string();
+            }
+            Ok(response) => {
+                let ttfb_ms = start.elapsed().as_secs_f64() * 1000.0;
+                let status = response.status().as_u16() as i32;
+                let final_url = response.url().to_string();
+                debug!("HTTP 请求完成: {} -> {} ({:.2}ms)", url, status, ttfb_ms);
+                return (Some(status), ttfb_ms, final_url, None);
+            }
+            Err(e) => {
+                debug!("HTTP 请求失败: {} - {}", url, e);
+                return (None, 0.0, current, Some(format!("请求失败: {}", e)));
+            }
         }
+    }
+    (None, 0.0, current, Some("重定向次数超过限制".into()))
+}
+
+fn format_socket_addr(host: &str, port: u16) -> String {
+    if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[{}]:{}", host, port)
+    } else {
+        format!("{}:{}", host, port)
     }
 }

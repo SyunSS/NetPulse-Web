@@ -31,7 +31,9 @@ impl VideoPlatformConfig {
             return false;
         }
         let lower = url.to_lowercase();
-        self.url_keywords.iter().any(|kw| lower.contains(&kw.to_lowercase()))
+        self.url_keywords
+            .iter()
+            .any(|kw| lower.contains(&kw.to_lowercase()))
     }
 
     /// 是否需要仅检测可访问性
@@ -57,6 +59,9 @@ pub fn match_platform(platforms: &[VideoPlatformConfig], url: &str) -> VideoPlat
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    /// Proxies whose forwarded client headers may be trusted.
+    #[serde(default)]
+    pub trusted_proxies: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -69,14 +74,18 @@ pub struct LoggingConfig {
     pub level: String,
     pub file_dir: String,
     #[serde(default = "default_log_format")]
-    pub format: String,      // "console" | "json"
+    pub format: String, // "console" | "json"
     #[serde(default = "default_true")]
     pub console: bool,
     #[serde(default = "default_true")]
     pub file: bool,
 }
-fn default_log_format() -> String { "console".to_string() }
-fn default_true() -> bool { true }
+fn default_log_format() -> String {
+    "console".to_string()
+}
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BrowserConfig {
@@ -122,7 +131,37 @@ impl AppConfig {
             .build()?;
 
         let app_config: AppConfig = config.try_deserialize()?;
+        app_config.validate()?;
         Ok(app_config)
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        const PLACEHOLDER: &str = "netpulse-jwt-secret-change-in-production";
+        if self.jwt.secret == PLACEHOLDER {
+            anyhow::bail!("JWT secret must be changed from the default placeholder");
+        }
+        if self.jwt.secret.as_bytes().len() < 32 {
+            anyhow::bail!("JWT secret must be at least 32 bytes");
+        }
+        for proxy in &self.server.trusted_proxies {
+            let valid = proxy.parse::<std::net::IpAddr>().is_ok()
+                || proxy
+                    .split_once('/')
+                    .and_then(|(network, prefix)| {
+                        let network = network.parse::<std::net::IpAddr>().ok()?;
+                        let prefix = prefix.parse::<u8>().ok()?;
+                        match network {
+                            std::net::IpAddr::V4(_) if prefix <= 32 => Some(()),
+                            std::net::IpAddr::V6(_) if prefix <= 128 => Some(()),
+                            _ => None,
+                        }
+                    })
+                    .is_some();
+            if !valid {
+                anyhow::bail!("invalid trusted proxy address or CIDR: {proxy}");
+            }
+        }
+        Ok(())
     }
 
     /// 获取服务器监听地址

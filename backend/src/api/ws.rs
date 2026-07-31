@@ -33,20 +33,35 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse, AppError> {
     // 验证 token
-    let _claims: Claims = match &query.token {
-        Some(token) => {
-            AuthService::verify_token(&state.config, token)
-                .map_err(|_| AppError::unauthorized("Token 无效或已过期"))?
-        }
+    let claims: Claims = match &query.token {
+        Some(token) => AuthService::verify_current_user(&state.db, &state.config, token)
+            .await
+            .map_err(|_| AppError::unauthorized("Token 无效或已过期"))?,
         None => {
             return Err(AppError::unauthorized("缺少认证 Token"));
         }
     };
-    Ok(ws.on_upgrade(move |socket| handle_ws(socket, state, query.task_id)))
+    if let Some(task_id) = &query.task_id {
+        let owner: Option<String> =
+            sqlx::query_scalar("SELECT user_id FROM test_task WHERE id = ?")
+                .bind(task_id)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|_| AppError::internal("无法验证任务权限"))?;
+        if owner.as_deref() != Some(claims.sub.as_str()) {
+            return Err(AppError::unauthorized("无权订阅此任务"));
+        }
+    }
+    Ok(ws.on_upgrade(move |socket| handle_ws(socket, state, claims.sub, query.task_id)))
 }
 
 /// 处理 WebSocket 连接
-async fn handle_ws(mut socket: WebSocket, state: AppState, initial_task_id: Option<String>) {
+async fn handle_ws(
+    mut socket: WebSocket,
+    state: AppState,
+    user_id: String,
+    initial_task_id: Option<String>,
+) {
     info!("WebSocket 连接已建立, 初始订阅: {:?}", initial_task_id);
 
     // 订阅进度广播
@@ -86,7 +101,14 @@ async fn handle_ws(mut socket: WebSocket, state: AppState, initial_task_id: Opti
                                 };
                                 task_id == filter_id
                             }
-                            None => true,
+                            None => sqlx::query_scalar::<_, bool>(
+                                "SELECT EXISTS(SELECT 1 FROM test_task WHERE id = ? AND user_id = ?)",
+                            )
+                            .bind(progress.task_id())
+                            .bind(&user_id)
+                            .fetch_one(&state.db)
+                            .await
+                            .unwrap_or(false),
                         };
 
                         if should_send {

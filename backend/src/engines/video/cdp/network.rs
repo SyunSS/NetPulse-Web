@@ -19,10 +19,14 @@ impl NetworkCollector {
         let url = &event.request.url;
         let lower = url.to_lowercase();
 
-        let video_ext = lower.contains(".mp4") || lower.contains(".m3u8")
-            || lower.contains(".mpd") || lower.contains(".m4s")
-            || lower.contains(".ts") || lower.contains(".flv")
-            || lower.contains(".webm") || lower.contains(".ogg");
+        let video_ext = lower.contains(".mp4")
+            || lower.contains(".m3u8")
+            || lower.contains(".mpd")
+            || lower.contains(".m4s")
+            || lower.contains(".ts")
+            || lower.contains(".flv")
+            || lower.contains(".webm")
+            || lower.contains(".ogg");
 
         if video_ext {
             let _ = self.tx.send(VideoEvent::SegmentLoaded {

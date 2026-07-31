@@ -1,7 +1,7 @@
 pub mod media_element;
-pub mod network_api;
 pub mod media_source;
 pub mod mutation;
+pub mod network_api;
 
 use chromiumoxide::page::{Page, ScreenshotParams};
 use tracing::info;
@@ -96,10 +96,11 @@ impl JSHookManager {
     }
 
     pub async fn screenshot(&self) -> anyhow::Result<Vec<u8>> {
-        let params = ScreenshotParams::builder()
-            .full_page(true)
-            .build();
-        let screenshot = self.page.screenshot(params).await
+        let params = ScreenshotParams::builder().full_page(true).build();
+        let screenshot = self
+            .page
+            .screenshot(params)
+            .await
             .map_err(|e| anyhow::anyhow!("截图失败: {}", e))?;
         Ok(screenshot)
     }

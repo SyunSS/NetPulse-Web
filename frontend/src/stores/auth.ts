@@ -3,11 +3,23 @@ import { ref, computed, watch } from 'vue'
 import type { UserInfo } from '@/api/auth'
 
 const STORAGE_KEY = 'netpulse-auth'
+interface StoredAuth {
+  token?: string
+  user?: UserInfo | null
+}
 
 export const useAuthStore = defineStore('auth', () => {
   // 从 localStorage 恢复
   const stored = localStorage.getItem(STORAGE_KEY)
-  const parsed = stored ? JSON.parse(stored) : null
+  let parsed: StoredAuth | null = null
+  if (stored) {
+    try {
+      const value: unknown = JSON.parse(stored)
+      if (value && typeof value === 'object') parsed = value as StoredAuth
+    } catch {
+      localStorage.removeItem(STORAGE_KEY)
+    }
+  }
 
   const token = ref<string>(parsed?.token || '')
   const user = ref<UserInfo | null>(parsed?.user || null)
@@ -29,6 +41,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout() {
+    window.dispatchEvent(new Event('netpulse:logout'))
     token.value = ''
     user.value = null
   }

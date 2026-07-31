@@ -28,7 +28,13 @@ async fn list_users(
         .await
         .map_err(|e| AppError::internal(&e.to_string()))?;
 
-    let safe_users: Vec<User> = users.into_iter().map(|u| User { password_hash: String::new(), ..u }).collect();
+    let safe_users: Vec<User> = users
+        .into_iter()
+        .map(|u| User {
+            password_hash: String::new(),
+            ..u
+        })
+        .collect();
     Ok(Json(ok(safe_users)))
 }
 
@@ -75,9 +81,13 @@ async fn delete_user(
     }
     // 检查是否是最后一个 admin
     let admin_count: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
-        .fetch_one(&state.db).await.map_err(|e| AppError::internal(&e.to_string()))?;
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| AppError::internal(&e.to_string()))?;
     let target_role: String = sqlx::query_scalar("SELECT role FROM users WHERE id = ?")
-        .bind(&user_id).fetch_optional(&state.db).await
+        .bind(&user_id)
+        .fetch_optional(&state.db)
+        .await
         .map_err(|e| AppError::internal(&e.to_string()))?
         .unwrap_or_default();
     if admin_count <= 1 && target_role == "admin" {
@@ -85,7 +95,9 @@ async fn delete_user(
     }
 
     sqlx::query("DELETE FROM users WHERE id = ?")
-        .bind(&user_id).execute(&state.db).await
+        .bind(&user_id)
+        .execute(&state.db)
+        .await
         .map_err(|e| AppError::internal(&e.to_string()))?;
 
     Ok(Json(ok_with_msg("用户已删除", ())))

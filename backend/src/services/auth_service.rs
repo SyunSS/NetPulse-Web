@@ -11,11 +11,11 @@ use crate::models::user::{LoginResponse, RegisterRequest, User, UserInfo};
 /// JWT Claims
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: String,       // user_id
+    pub sub: String, // user_id
     pub username: String,
     pub role: String,
-    pub exp: usize,        // 过期时间
-    pub iat: usize,        // 签发时间
+    pub exp: usize, // 过期时间
+    pub iat: usize, // 签发时间
 }
 
 /// 认证服务
@@ -23,10 +23,7 @@ pub struct AuthService;
 
 impl AuthService {
     /// 用户注册
-    pub async fn register(
-        pool: &SqlitePool,
-        req: &RegisterRequest,
-    ) -> anyhow::Result<UserInfo> {
+    pub async fn register(pool: &SqlitePool, req: &RegisterRequest) -> anyhow::Result<UserInfo> {
         // 验证用户名
         if req.username.trim().is_empty() {
             anyhow::bail!("用户名不能为空");
@@ -44,27 +41,27 @@ impl AuthService {
             anyhow::bail!("密码需要包含至少一个数字");
         }
 
-        // 检查用户名是否已存在
-        let existing = sqlx::query_scalar::<_, i32>(
-            "SELECT COUNT(*) FROM users WHERE username = ?",
-        )
-        .bind(&req.username)
-        .fetch_one(pool)
-        .await?;
-
-        if existing > 0 {
-            anyhow::bail!("用户名已存在");
-        }
-
         // 密码哈希
         let password_hash = hash(&req.password, DEFAULT_COST)?;
 
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
 
-        // 首个注册用户自动设为管理员
+        let mut tx = pool.begin().await?;
+
+        let existing =
+            sqlx::query_scalar::<_, i32>("SELECT COUNT(*) FROM users WHERE username = ?")
+                .bind(&req.username)
+                .fetch_one(&mut *tx)
+                .await?;
+        if existing > 0 {
+            anyhow::bail!("用户名已存在");
+        }
+
+        // Run the first-admin check and insert in one write transaction so two
+        // concurrent first registrations cannot both observe an empty table.
         let total_count: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-            .fetch_one(pool)
+            .fetch_one(&mut *tx)
             .await?;
         let role = if total_count == 0 { "admin" } else { "user" };
 
@@ -77,8 +74,10 @@ impl AuthService {
         .bind(role)
         .bind(&now)
         .bind(&now)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+
+        tx.commit().await?;
 
         Ok(UserInfo {
             id,
@@ -136,5 +135,23 @@ impl AuthService {
             &Validation::default(),
         )?;
         Ok(token_data.claims)
+    }
+
+    /// Validate both the token and the current database identity. This makes
+    /// role changes and deleted users take effect before the request reaches a handler.
+    pub async fn verify_current_user(
+        pool: &SqlitePool,
+        config: &AppConfig,
+        token: &str,
+    ) -> anyhow::Result<Claims> {
+        let mut claims = Self::verify_token(config, token)?;
+        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+            .bind(&claims.sub)
+            .fetch_optional(pool)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("用户不存在"))?;
+        claims.username = user.username;
+        claims.role = user.role;
+        Ok(claims)
     }
 }

@@ -95,10 +95,15 @@ impl MetricCollector {
 
     pub fn on_event(&mut self, event: &VideoEvent) {
         match event {
-            VideoEvent::PlayStarted { player_id: _, video_src, meta: _ } => {
+            VideoEvent::PlayStarted {
+                player_id: _,
+                video_src,
+                meta: _,
+            } => {
                 if !self.play_started {
                     self.play_started = true;
-                    self.first_play_elapsed = Some(self.engine_start.elapsed().as_secs_f64() * 1000.0);
+                    self.first_play_elapsed =
+                        Some(self.engine_start.elapsed().as_secs_f64() * 1000.0);
                     self.metrics.play_success = true;
                     self.metrics.first_play_time_ms = self.first_play_elapsed;
                 }
@@ -121,33 +126,55 @@ impl MetricCollector {
                 if self.buffer_active {
                     self.buffer_active = false;
                     let dur = *duration_ms;
-                    self.metrics.buffer_time_ms += if dur > 0.0 { dur } else {
+                    self.metrics.buffer_time_ms += if dur > 0.0 {
+                        dur
+                    } else {
                         self.buffer_start_time.elapsed().as_secs_f64() * 1000.0
                     };
                 }
             }
             VideoEvent::ResolutionChanged { width, height, .. } => {
                 self.metrics.resolution = Some(format!("{}x{}", width, height));
-                if self.metrics.video_width == 0 { self.metrics.video_width = *width; }
-                if self.metrics.video_height == 0 { self.metrics.video_height = *height; }
+                if self.metrics.video_width == 0 {
+                    self.metrics.video_width = *width;
+                }
+                if self.metrics.video_height == 0 {
+                    self.metrics.video_height = *height;
+                }
             }
-            VideoEvent::BitrateChanged { video_kbps, audio_kbps, .. } => {
+            VideoEvent::BitrateChanged {
+                video_kbps,
+                audio_kbps,
+                ..
+            } => {
                 self.metrics.video_bitrate_kbps = Some(*video_kbps);
                 self.metrics.audio_bitrate_kbps = Some(*audio_kbps);
             }
-            VideoEvent::DroppedFramesChanged { dropped, decoded, .. } => {
+            VideoEvent::DroppedFramesChanged {
+                dropped, decoded, ..
+            } => {
                 self.metrics.dropped_frames = *dropped;
                 self.metrics.decoded_frames = *decoded;
             }
             VideoEvent::FpsChanged { fps, .. } => {
                 self.metrics.fps = Some(*fps);
             }
-            VideoEvent::CodecDetected { video_codec, audio_codec, mime_type, .. } => {
+            VideoEvent::CodecDetected {
+                video_codec,
+                audio_codec,
+                mime_type,
+                ..
+            } => {
                 self.metrics.video_codec = Some(video_codec.clone());
                 self.metrics.audio_codec = Some(audio_codec.clone());
                 self.metrics.mime_type = Some(mime_type.clone());
             }
-            VideoEvent::SegmentLoaded { url, host, size_bytes, .. } => {
+            VideoEvent::SegmentLoaded {
+                url,
+                host,
+                size_bytes,
+                ..
+            } => {
                 self.metrics.segment_count += 1;
                 self.metrics.total_bytes += size_bytes;
                 if self.metrics.video_host.is_none() {
@@ -159,7 +186,9 @@ impl MetricCollector {
                 let sample_elapsed = now.duration_since(self.last_bytes_sample_time);
                 if sample_elapsed.as_secs_f64() >= 1.0 {
                     let bps = self.current_sample_bytes as f64 / sample_elapsed.as_secs_f64();
-                    if bps > self.peak_bps { self.peak_bps = bps; }
+                    if bps > self.peak_bps {
+                        self.peak_bps = bps;
+                    }
                     self.current_sample_bytes = 0;
                     self.last_bytes_sample_time = now;
                 }
@@ -169,7 +198,11 @@ impl MetricCollector {
                     self.metrics.cdn_node = Some(cdn_node.clone());
                 }
             }
-            VideoEvent::VideoError { error_type, message, .. } => {
+            VideoEvent::VideoError {
+                error_type,
+                message,
+                ..
+            } => {
                 if self.metrics.error.is_none() {
                     self.metrics.error = Some(format!("{}: {}", error_type, message));
                 }
@@ -208,9 +241,15 @@ impl MetricCollector {
 
     /// 更新卡顿相关指标（从 JS 轮询数据）
     pub fn update_stutter(&mut self, current_time: f64, width: u32, height: u32, duration: f64) {
-        if self.metrics.video_width == 0 { self.metrics.video_width = width; }
-        if self.metrics.video_height == 0 { self.metrics.video_height = height; }
-        if self.metrics.video_duration_sec == 0.0 { self.metrics.video_duration_sec = duration; }
+        if self.metrics.video_width == 0 {
+            self.metrics.video_width = width;
+        }
+        if self.metrics.video_height == 0 {
+            self.metrics.video_height = height;
+        }
+        if self.metrics.video_duration_sec == 0.0 {
+            self.metrics.video_duration_sec = duration;
+        }
 
         if self.play_started && self.last_current_time > 0.0 {
             let delta = (current_time - self.last_current_time).abs();
@@ -222,7 +261,8 @@ impl MetricCollector {
                 }
             } else if self.stutter_active {
                 self.stutter_active = false;
-                self.metrics.stutter_duration_ms += self.stutter_start_time.elapsed().as_secs_f64() * 1000.0;
+                self.metrics.stutter_duration_ms +=
+                    self.stutter_start_time.elapsed().as_secs_f64() * 1000.0;
             }
         }
         self.last_current_time = current_time;
@@ -235,7 +275,8 @@ impl MetricCollector {
         }
         // 处理未结束的卡顿
         if self.stutter_active {
-            self.metrics.stutter_duration_ms += self.stutter_start_time.elapsed().as_secs_f64() * 1000.0;
+            self.metrics.stutter_duration_ms +=
+                self.stutter_start_time.elapsed().as_secs_f64() * 1000.0;
         }
         // 下载速度
         let elapsed = self.engine_start.elapsed().as_secs_f64();
@@ -249,7 +290,8 @@ impl MetricCollector {
         self.metrics.play_duration_sec = self.play_duration();
         // stutter_ratio
         if self.metrics.play_duration_sec > 0.0 {
-            self.metrics.stutter_ratio = self.metrics.stutter_duration_ms / 1000.0 / self.metrics.play_duration_sec * 100.0;
+            self.metrics.stutter_ratio =
+                self.metrics.stutter_duration_ms / 1000.0 / self.metrics.play_duration_sec * 100.0;
         }
         self.metrics
     }

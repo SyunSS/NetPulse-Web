@@ -2,9 +2,9 @@ pub mod browser;
 pub mod cdp {
     pub mod media;
     pub mod network;
+    pub mod page;
     pub mod performance;
     pub mod runtime;
-    pub mod page;
 }
 pub mod diagnostics;
 pub mod events;
@@ -15,7 +15,7 @@ pub mod players;
 use std::time::Duration;
 
 use futures::StreamExt;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::config::VideoPlatformConfig;
 use crate::engines::dns::DnsEngine;
@@ -73,19 +73,44 @@ pub struct VideoTestResult {
 impl Default for VideoTestResult {
     fn default() -> Self {
         Self {
-            platform: String::new(), dns_time_ms: None, dns_success: false,
-            tcp_time_ms: None, http_response_ms: None, first_play_time_ms: None,
-            play_success: false, buffer_count: None, buffer_time_ms: None,
-            total_buffer_time_ms: None, buffer_rate: None, dropped_frames: None,
-            decoded_frames: None, video_download_speed: None, video_size: None,
-            video_duration_ms: None, video_host: None, page_title: None,
-            screenshot: None, error: None, trigger_method: None,
-            stutter_count: None, stutter_duration_ms: None, play_duration_sec: None,
-            stutter_ratio: None, video_width: None, video_height: None,
-            video_duration_sec: None, player_type: None, video_codec: None,
-            audio_codec: None, resolution: None, fps: None,
-            video_bitrate_kbps: None, audio_bitrate_kbps: None,
-            segment_count: None, total_bytes: None, download_speed: None,
+            platform: String::new(),
+            dns_time_ms: None,
+            dns_success: false,
+            tcp_time_ms: None,
+            http_response_ms: None,
+            first_play_time_ms: None,
+            play_success: false,
+            buffer_count: None,
+            buffer_time_ms: None,
+            total_buffer_time_ms: None,
+            buffer_rate: None,
+            dropped_frames: None,
+            decoded_frames: None,
+            video_download_speed: None,
+            video_size: None,
+            video_duration_ms: None,
+            video_host: None,
+            page_title: None,
+            screenshot: None,
+            error: None,
+            trigger_method: None,
+            stutter_count: None,
+            stutter_duration_ms: None,
+            play_duration_sec: None,
+            stutter_ratio: None,
+            video_width: None,
+            video_height: None,
+            video_duration_sec: None,
+            player_type: None,
+            video_codec: None,
+            audio_codec: None,
+            resolution: None,
+            fps: None,
+            video_bitrate_kbps: None,
+            audio_bitrate_kbps: None,
+            segment_count: None,
+            total_bytes: None,
+            download_speed: None,
             peak_speed: None,
         }
     }
@@ -108,7 +133,7 @@ impl From<VideoMetrics> for VideoTestResult {
             dropped_frames: Some(m.dropped_frames as i32),
             decoded_frames: Some(m.decoded_frames as i32),
             video_download_speed: m.download_speed,
-            video_size: Some(m.total_bytes as i32),
+            video_size: Some(m.total_bytes.min(i32::MAX as u64) as i32),
             video_duration_ms: Some(m.video_duration_sec * 1000.0),
             video_host: m.video_host,
             page_title: m.page_title,
@@ -130,7 +155,7 @@ impl From<VideoMetrics> for VideoTestResult {
             video_bitrate_kbps: m.video_bitrate_kbps,
             audio_bitrate_kbps: m.audio_bitrate_kbps,
             segment_count: Some(m.segment_count as i32),
-            total_bytes: Some(m.total_bytes as i32),
+            total_bytes: Some(m.total_bytes.min(i32::MAX as u64) as i32),
             download_speed: m.download_speed,
             peak_speed: m.peak_speed,
         }
@@ -154,16 +179,46 @@ impl VideoEngine {
         }
     }
 
-    pub async fn test_page(&self, url: &str, platform_cfg: &VideoPlatformConfig) -> VideoTestResult {
+    pub async fn test_page(
+        &self,
+        url: &str,
+        platform_cfg: &VideoPlatformConfig,
+    ) -> VideoTestResult {
+        match tokio::time::timeout(self.timeout, self.test_page_inner(url, platform_cfg)).await {
+            Ok(result) => result,
+            Err(_) => {
+                let mut result = VideoTestResult {
+                    platform: platform_cfg.name.clone(),
+                    ..Default::default()
+                };
+                result.error = Some("视频测试超时".into());
+                result
+            }
+        }
+    }
+
+    async fn test_page_inner(
+        &self,
+        url: &str,
+        platform_cfg: &VideoPlatformConfig,
+    ) -> VideoTestResult {
         let diag = DiagnosticLogger::new();
-        info!("[VideoEngine] 开始测试: {} (平台: {})", url, platform_cfg.name);
+        info!(
+            "[VideoEngine] 开始测试: {} (平台: {})",
+            url, platform_cfg.name
+        );
         diag.log_phase(&format!("开始测试: {}", url));
 
         // 1. DNS 探测
         diag.log_phase("DNS 解析...");
-        let dns_result = DnsEngine::resolve(url).await.unwrap_or_else(|_| {
-            crate::engines::dns::DnsResult { dns_time_ms: 0.0, dns_success: false, resolved_ips: vec![] }
-        });
+        let dns_result =
+            DnsEngine::resolve(url)
+                .await
+                .unwrap_or_else(|_| crate::engines::dns::DnsResult {
+                    dns_time_ms: 0.0,
+                    dns_success: false,
+                    resolved_ips: vec![],
+                });
 
         // 2. HTTP/TCP 探测
         diag.log_phase("HTTP/TCP 探测...");
@@ -172,16 +227,18 @@ impl VideoEngine {
         // 仅检测模式
         if platform_cfg.is_detect_only() {
             diag.log_phase("detect_only 模式，跳过浏览器测试");
-            return VideoTestResult {
+            let mut result = VideoTestResult {
                 platform: platform_cfg.name.clone(),
                 dns_time_ms: Some(dns_result.dns_time_ms),
                 dns_success: dns_result.dns_success,
                 tcp_time_ms: Some(http_result.tcp_time_ms),
                 http_response_ms: Some(http_result.ttfb_ms),
-                play_success: true,
+                play_success: http_result.error.is_none(),
                 trigger_method: Some("detect_only".into()),
                 ..Default::default()
             };
+            result.error = http_result.error;
+            return result;
         }
 
         // 3. 启动 Chromium
@@ -200,8 +257,12 @@ impl VideoEngine {
                 diag.log_phase(&err_msg);
                 error!("{}", err_msg);
                 return VideoMetrics::error_result(
-                    &platform_cfg.name, dns_result, http_result, &err_msg,
-                ).into();
+                    &platform_cfg.name,
+                    dns_result,
+                    http_result,
+                    &err_msg,
+                )
+                .into();
             }
         };
 
@@ -214,8 +275,12 @@ impl VideoEngine {
                 diag.log_phase(&err_msg);
                 error!("{}", err_msg);
                 return VideoMetrics::error_result(
-                    &platform_cfg.name, dns_result, http_result, &err_msg,
-                ).into();
+                    &platform_cfg.name,
+                    dns_result,
+                    http_result,
+                    &err_msg,
+                )
+                .into();
             }
         };
 
@@ -232,9 +297,10 @@ impl VideoEngine {
         diag.log_phase("注册 CDP 事件监听器...");
 
         let tx = event_tx.clone();
-        if let Ok(mut stream) = page.event_listener::<
-            chromiumoxide::cdp::browser_protocol::media::EventPlayerCreated
-        >().await {
+        if let Ok(mut stream) = page
+            .event_listener::<chromiumoxide::cdp::browser_protocol::media::EventPlayerCreated>()
+            .await
+        {
             tokio::spawn(async move {
                 let collector = cdp::media::MediaCollector::new(tx.clone());
                 while let Some(event) = stream.next().await {
@@ -244,9 +310,10 @@ impl VideoEngine {
         }
 
         let tx = event_tx.clone();
-        if let Ok(mut stream) = page.event_listener::<
-            chromiumoxide::cdp::browser_protocol::media::EventPlayerEventsAdded
-        >().await {
+        if let Ok(mut stream) = page
+            .event_listener::<chromiumoxide::cdp::browser_protocol::media::EventPlayerEventsAdded>()
+            .await
+        {
             tokio::spawn(async move {
                 let collector = cdp::media::MediaCollector::new(tx.clone());
                 while let Some(event) = stream.next().await {
@@ -280,9 +347,11 @@ impl VideoEngine {
         }
 
         let tx = event_tx.clone();
-        if let Ok(mut stream) = page.event_listener::<
-            chromiumoxide::cdp::browser_protocol::network::EventResponseReceived
-        >().await {
+        if let Ok(mut stream) = page
+            .event_listener::<chromiumoxide::cdp::browser_protocol::network::EventResponseReceived>(
+            )
+            .await
+        {
             tokio::spawn(async move {
                 let collector = cdp::network::NetworkCollector::new(tx.clone());
                 while let Some(event) = stream.next().await {
@@ -292,9 +361,10 @@ impl VideoEngine {
         }
 
         let tx = event_tx.clone();
-        if let Ok(mut stream) = page.event_listener::<
-            chromiumoxide::cdp::browser_protocol::network::EventDataReceived
-        >().await {
+        if let Ok(mut stream) = page
+            .event_listener::<chromiumoxide::cdp::browser_protocol::network::EventDataReceived>()
+            .await
+        {
             tokio::spawn(async move {
                 let collector = cdp::network::NetworkCollector::new(tx.clone());
                 while let Some(event) = stream.next().await {
@@ -304,9 +374,10 @@ impl VideoEngine {
         }
 
         let tx = event_tx.clone();
-        if let Ok(mut stream) = page.event_listener::<
-            chromiumoxide::cdp::js_protocol::runtime::EventConsoleApiCalled
-        >().await {
+        if let Ok(mut stream) = page
+            .event_listener::<chromiumoxide::cdp::js_protocol::runtime::EventConsoleApiCalled>()
+            .await
+        {
             tokio::spawn(async move {
                 let collector = cdp::runtime::RuntimeCollector::new(tx.clone());
                 while let Some(event) = stream.next().await {
@@ -315,9 +386,10 @@ impl VideoEngine {
             });
         }
 
-        if let Ok(mut stream) = page.event_listener::<
-            chromiumoxide::cdp::browser_protocol::page::EventLoadEventFired
-        >().await {
+        if let Ok(mut stream) = page
+            .event_listener::<chromiumoxide::cdp::browser_protocol::page::EventLoadEventFired>()
+            .await
+        {
             tokio::spawn(async move {
                 while let Some(_event) = stream.next().await {
                     info!("页面 Load 事件触发");
@@ -334,8 +406,12 @@ impl VideoEngine {
             diag.log_phase(&err_msg);
             error!("{}", err_msg);
             return VideoMetrics::error_result(
-                &platform_cfg.name, dns_result, http_result, &err_msg,
-            ).into();
+                &platform_cfg.name,
+                dns_result,
+                http_result,
+                &err_msg,
+            )
+            .into();
         }
         let _ = event_tx.send(VideoEvent::PageLoaded {
             url: url.to_string(),
@@ -362,7 +438,9 @@ impl VideoEngine {
         diag.log_phase("识别播放器...");
         let registry = PlayerRegistry::new();
         let player = registry.detect(&page, url).await;
-        let player_name = player.map(|p| p.name().to_string()).unwrap_or_else(|| "html5".to_string());
+        let player_name = player
+            .map(|p| p.name().to_string())
+            .unwrap_or_else(|| "html5".to_string());
         diag.log_phase(&format!("播放器: {}", player_name));
 
         let video_count = hook_manager.detect_video_elements().await.unwrap_or(0);
@@ -393,7 +471,8 @@ impl VideoEngine {
 
         loop {
             tokio::select! {
-                Some(event) = event_rx.recv() => {
+                event = event_rx.recv() => {
+                    let Some(event) = event else { break };
                     diag.log_event(&event);
                     collector.on_event(&event);
                 }

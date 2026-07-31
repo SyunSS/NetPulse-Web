@@ -1,3 +1,4 @@
+use std::time::Duration;
 use std::time::Instant;
 
 use hickory_resolver::config::ResolverConfig;
@@ -20,18 +21,20 @@ pub struct DnsEngine;
 impl DnsEngine {
     /// 解析域名，返回解析耗时和结果
     pub async fn resolve(domain: &str) -> anyhow::Result<DnsResult> {
-        let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
+        let resolver =
+            TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
 
         // 去除协议和路径，只保留域名
         let host = extract_host(domain);
         debug!("DNS 解析: {}", host);
 
         let start = Instant::now();
-        let response = resolver.lookup_ip(host).await;
+        let response =
+            tokio::time::timeout(Duration::from_secs(5), resolver.lookup_ip(host.as_str())).await;
         let elapsed = start.elapsed().as_secs_f64() * 1000.0;
 
         match response {
-            Ok(lookup) => {
+            Ok(Ok(lookup)) => {
                 let ips: Vec<String> = lookup.iter().map(|ip| ip.to_string()).collect();
                 let success = !ips.is_empty();
                 debug!("DNS 解析成功: {} -> {:?} ({:.2}ms)", host, ips, elapsed);
@@ -41,8 +44,16 @@ impl DnsEngine {
                     resolved_ips: ips,
                 })
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 debug!("DNS 解析失败: {} - {}", host, e);
+                Ok(DnsResult {
+                    dns_time_ms: elapsed,
+                    dns_success: false,
+                    resolved_ips: vec![],
+                })
+            }
+            Err(_) => {
+                debug!("DNS 解析超时: {}", host);
                 Ok(DnsResult {
                     dns_time_ms: elapsed,
                     dns_success: false,
@@ -54,17 +65,28 @@ impl DnsEngine {
 }
 
 /// 从 URL 中提取主机名
-fn extract_host(input: &str) -> &str {
+fn extract_host(input: &str) -> String {
     let input = input.trim();
-    // 去除协议
-    let after_protocol = input
-        .split("://")
-        .nth(1)
-        .unwrap_or(input);
-    // 去除路径
+    let parsed = url::Url::parse(input).ok();
+    if let Some(host) = parsed.and_then(|url| url.host_str().map(str::to_string)) {
+        return host;
+    }
+    let after_protocol = input.split("://").nth(1).unwrap_or(input);
     let after_path = after_protocol.split('/').next().unwrap_or(after_protocol);
-    // 去除端口
-    after_path.split(':').next().unwrap_or(after_path)
+    after_path
+        .strip_prefix('[')
+        .and_then(|s| s.split_once(']').map(|(h, _)| h.to_string()))
+        .unwrap_or_else(|| {
+            if after_path.parse::<std::net::IpAddr>().is_ok() {
+                after_path.to_string()
+            } else {
+                after_path
+                    .split(':')
+                    .next()
+                    .unwrap_or(after_path)
+                    .to_string()
+            }
+        })
 }
 
 #[cfg(test)]
@@ -73,7 +95,10 @@ mod tests {
 
     #[test]
     fn test_extract_host() {
-        assert_eq!(extract_host("https://www.example.com/path"), "www.example.com");
+        assert_eq!(
+            extract_host("https://www.example.com/path"),
+            "www.example.com"
+        );
         assert_eq!(extract_host("http://example.com:8080"), "example.com");
         assert_eq!(extract_host("example.com"), "example.com");
     }

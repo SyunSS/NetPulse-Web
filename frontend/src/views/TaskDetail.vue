@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDialog, useMessage } from 'naive-ui'
 import { taskApi, type TestTask, type WebsiteResult, type VideoResult, type DownloadResult, type PingResult } from '@/api/task'
-import { getWsClient, type ProgressMessage } from '@/api/ws'
+import { getWsClient, closeWsClient, type ProgressMessage } from '@/api/ws'
 import { useAuthStore } from '@/stores/auth'
 import { formatMs, formatFileSize, formatTime } from '@/utils'
 import http from '@/api/index'
+import { getErrorMessage } from '@/api/index'
 
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const authStore = useAuthStore()
-const taskId = route.params.id as string
+const taskId = computed(() => route.params.id as string)
 
 const task = ref<TestTask | null>(null)
 const websiteResults = ref<WebsiteResult[]>([])
@@ -26,9 +27,30 @@ const taskLogs = ref<LogEntry[]>([])
 interface LogEntry { level: string; message: string; created_at: string }
 const ws = getWsClient()
 
+async function handleCancel() {
+  try {
+    await taskApi.cancel(taskId.value)
+    await fetchData()
+  } catch (e: unknown) {
+    message.error(getErrorMessage(e, '取消失败'))
+  }
+}
+
+async function handleRetry() {
+  try {
+    const result = await taskApi.retry(taskId.value)
+    router.push('/task/' + result.data.task_id)
+  } catch (e: unknown) {
+    message.error(getErrorMessage(e, '重试失败'))
+  }
+}
+
 async function fetchLogs() {
-  try { taskLogs.value = ((await http.get(`/task/${taskId}/logs`)).data || []) as LogEntry[] }
-  catch (_) {}
+  try {
+    taskLogs.value = ((await http.get(`/task/${taskId.value}/logs`)).data || []) as LogEntry[]
+  } catch (e: unknown) {
+    message.error(getErrorMessage(e, '日志加载失败'))
+  }
 }
 
 function scrollToLogs() { document.querySelector('.log-section')?.scrollIntoView({behavior:'smooth'}) }
@@ -41,34 +63,40 @@ const isPingTask = computed(() => task.value?.task_type === 'ping')
 
 async function fetchData() {
   loading.value = true
+  task.value = null
+  websiteResults.value = []
+  videoResults.value = []
+  downloadResults.value = []
+  pingResults.value = []
+  logs.value = []
   try {
-    const taskRes = await taskApi.get(taskId)
+    const id = taskId.value
+    const taskRes = await taskApi.get(id)
     task.value = taskRes.data
     progress.value = task.value.progress ?? 0
 
     if (isVideoTask.value) {
-      videoResults.value = (await taskApi.getVideoResults(taskId)).data
+      videoResults.value = (await taskApi.getVideoResults(id)).data
     } else if (isDownloadTask.value) {
-      downloadResults.value = (await taskApi.getDownloadResults(taskId)).data
+      downloadResults.value = (await taskApi.getDownloadResults(id)).data
     } else if (isPingTask.value) {
-      pingResults.value = (await taskApi.getPingResults(taskId)).data
+      pingResults.value = (await taskApi.getPingResults(id)).data
     } else {
-      websiteResults.value = (await taskApi.getResults(taskId)).data
+      websiteResults.value = (await taskApi.getResults(id)).data
     }
   } catch (e: unknown) {
-    message.error((e as Error).message || '加载失败')
+    message.error(getErrorMessage(e, '加载失败'))
   } finally {
     loading.value = false
   }
 }
 
 function handleWsMessage(msg: ProgressMessage) {
-  if (msg.task_id !== taskId) return
+  if (msg.task_id !== taskId.value) return
   if (msg.type === 'progress_update') progress.value = msg.progress
   if (msg.type === 'log') logs.value.push(msg.message)
   if (['url_completed','task_completed','task_failed'].includes(msg.type)) fetchData()
 }
-    fetchLogs()
 
 async function handleDelete(force?: boolean) {
   const msg = force ? '强制删除此任务及所有结果？此操作不可恢复。' : '确认删除此任务？'
@@ -80,38 +108,48 @@ async function handleDelete(force?: boolean) {
     negativeText: '取消',
     onPositiveClick: async () => {
       try {
-        const url = force ? `/task/${taskId}?force=true` : `/task/${taskId}`
+        const url = force ? `/task/${taskId.value}?force=true` : `/task/${taskId.value}`
         await http.delete(url)
         router.push('/')
-      } catch (e: any) { message.error(e.message || '删除失败') }
+      } catch (e: unknown) { message.error(getErrorMessage(e, '删除失败')) }
     },
   })
 }
 
 async function handleExport(format: string) {
   try {
-    const blob: Blob = await http.get(`/task/${taskId}/export`, {
+    const blob: Blob = await http.get(`/task/${taskId.value}/export`, {
       params: { format },
       responseType: 'blob',
     })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
     const ext = format === 'xlsx' ? 'xlsx' : format === 'csv' ? 'csv' : 'json'
-    a.download = `result_${taskId.substring(0, 8)}.${ext}`
+    a.download = `result_${taskId.value.substring(0, 8)}.${ext}`
     a.click()
     URL.revokeObjectURL(a.href)
     message.success('导出成功')
-  } catch (e: any) { message.error(e.message || '导出失败') }
+  } catch (e: unknown) { message.error(getErrorMessage(e, '导出失败')) }
 }
 
 onMounted(() => {
   fetchLogs()
   fetchData()
-  ws.connect(taskId)
+  ws.connect(taskId.value)
   unsubWs = ws.onMessage(handleWsMessage)
 })
 
-onUnmounted(() => { if (unsubWs) unsubWs() })
+watch(taskId, (id, oldId) => {
+  if (id === oldId) return
+  ws.connect(id)
+  fetchLogs()
+  fetchData()
+})
+
+onUnmounted(() => {
+  if (unsubWs) unsubWs()
+  closeWsClient()
+})
 
 const st = (s: string) => s === 'completed' ? '已完成' : s === 'running' ? '运行中' : s === 'failed' ? '失败' : s === 'pending' ? '等待' : s
 const stClass = (s: string) => `st st-${s}`
@@ -125,9 +163,9 @@ const stClass = (s: string) => `st st-${s}`
         <h1 class="page-title">任务详情</h1>
       </div>
       <div class="header-actions">
-        <button v-if="task && (task.status==='pending'||task.status==='running')" class="btn warning" @click="taskApi.cancel(taskId).then(fetchData)">取消任务</button>
+         <button v-if="task && (task.status==='pending'||task.status==='running')" class="btn warning" @click="handleCancel">取消任务</button>
         <button v-if="task && task.status==='running'" class="btn danger" @click="handleDelete(true)">强制删除</button>
-        <button v-if="task && ['completed','failed','cancelled'].includes(task.status)" class="btn primary" @click="taskApi.retry(taskId).then(r=>router.push('/task/'+r.data.task_id))">重新测试</button>
+         <button v-if="task && ['completed','failed','cancelled'].includes(task.status)" class="btn primary" @click="handleRetry">重新测试</button>
         <button v-if="task && !['pending','running'].includes(task.status)" class="btn danger" @click="handleDelete()">删除</button>
         <button class="btn" @click="scrollToLogs">日志</button>
         <div v-if="task?.status==='completed'" style="display:flex;gap:6px">

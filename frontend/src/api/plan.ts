@@ -122,7 +122,7 @@ export const planApi = {
   runs(planId: string, params?: { start?: string; end?: string; limit?: number }) {
     return http.get<unknown, { code: number; msg: string; data: TaskPlanRun[] }>(
       `/plan/${planId}/runs`,
-      { params: { limit: 50, ...params } },
+      { params: { limit: 100, ...params } },
     )
   },
 

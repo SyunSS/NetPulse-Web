@@ -3,6 +3,12 @@
  */
 import { useAuthStore } from '@/stores/auth'
 
+let wsClient: WsClient | null = null
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('netpulse:logout', () => wsClient?.close())
+}
+
 export type ProgressMessage =
   | { type: 'task_started'; task_id: string; total_urls: number }
   | { type: 'url_testing'; task_id: string; url: string; current: number; total: number }
@@ -20,8 +26,16 @@ export class WsClient {
   private handlers: Set<MessageHandler> = new Set()
   private reconnectTimer: number | null = null
   private taskId: string | null = null
+  private shouldReconnect = false
 
   connect(taskId?: string) {
+    this.shouldReconnect = true
+    this.clearReconnectTimer()
+    if (this.ws) {
+      this.ws.onclose = null
+      this.ws.close()
+      this.ws = null
+    }
     this.taskId = taskId || null
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
@@ -45,14 +59,13 @@ export class WsClient {
       }
     }
 
-    this.ws.onclose = () => {
+    const socket = this.ws
+    socket.onclose = () => {
       if (import.meta.env.DEV) console.log('[WS] 连接已关闭')
-      // 自动重连（3秒后）
-      this.reconnectTimer = window.setTimeout(() => {
-        if (this.taskId) {
-          this.connect(this.taskId)
-        }
-      }, 3000)
+      if (this.ws === socket) this.ws = null
+      if (this.shouldReconnect) {
+        this.reconnectTimer = window.setTimeout(() => this.connect(this.taskId || undefined), 3000)
+      }
     }
 
     this.ws.onerror = (e) => {
@@ -66,23 +79,32 @@ export class WsClient {
   }
 
   close() {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-    }
+    this.shouldReconnect = false
+    this.clearReconnectTimer()
+    this.taskId = null
     if (this.ws) {
+      this.ws.onclose = null
       this.ws.close()
       this.ws = null
     }
     this.handlers.clear()
   }
-}
 
-// 全局单例
-let wsClient: WsClient | null = null
+  private clearReconnectTimer() {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+  }
+}
 
 export function getWsClient(): WsClient {
   if (!wsClient) {
     wsClient = new WsClient()
   }
   return wsClient
+}
+
+export function closeWsClient() {
+  wsClient?.close()
 }

@@ -2,6 +2,16 @@ import axios from 'axios'
 import { useAuthStore } from '@/stores/auth'
 import router from '@/router'
 
+export function getErrorMessage(error: unknown, fallback = '请求失败'): string {
+  const response = (error as { response?: { data?: unknown } })?.response
+  const data = response?.data
+  if (data && typeof data === 'object' && 'msg' in data && typeof data.msg === 'string') {
+    return data.msg
+  }
+  if (error instanceof Error && error.message) return error.message
+  return fallback
+}
+
 const http = axios.create({
   baseURL: '/api',
   timeout: 30000,
@@ -38,7 +48,18 @@ http.interceptors.response.use(
       authStore.logout()
       router.push('/login')
     }
-    return Promise.reject(error)
+    const data = error.response?.data
+    if (data instanceof Blob) {
+      return data.text().then((text) => {
+        try {
+          const parsed = JSON.parse(text)
+          return Promise.reject(new Error(parsed.msg || '请求失败'))
+        } catch {
+          return Promise.reject(new Error(error.message || '请求失败'))
+        }
+      })
+    }
+    return Promise.reject(new Error(data?.msg || error.message || '请求失败'))
   },
 )
 

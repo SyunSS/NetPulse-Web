@@ -24,6 +24,7 @@ pub enum TaskType {
     Website,
     Download,
     Video,
+    Ping,
 }
 
 impl TaskType {
@@ -32,6 +33,7 @@ impl TaskType {
             TaskType::Website => "website",
             TaskType::Download => "download",
             TaskType::Video => "video",
+            TaskType::Ping => "ping",
         }
     }
 }
@@ -81,9 +83,13 @@ pub struct TestConfig {
     #[serde(default = "default_repeat_count")]
     pub repeat_count: usize,
 }
-fn default_repeat_count() -> usize { 1 }
+fn default_repeat_count() -> usize {
+    1
+}
 impl Default for TestConfig {
-    fn default() -> Self { Self { repeat_count: 1 } }
+    fn default() -> Self {
+        Self { repeat_count: 1 }
+    }
 }
 
 /// 网站测试结果模型

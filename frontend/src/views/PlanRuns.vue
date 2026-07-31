@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDialog, useMessage } from 'naive-ui'
 import { usePlanStore } from '@/stores/plan'
-import { getWsClient, type ProgressMessage } from '@/api/ws'
+import { getWsClient, closeWsClient, type ProgressMessage } from '@/api/ws'
 import http from '@/api/index'
+import { getErrorMessage } from '@/api/index'
 import { formatTime } from '@/utils'
 
 const route = useRoute()
@@ -12,7 +13,7 @@ const router = useRouter()
 const message = useMessage()
 const planStore = usePlanStore()
 
-const planId = route.params.id as string
+const planId = computed(() => route.params.id as string)
 const ws = getWsClient()
 let unsubWs: (() => void) | null = null
 
@@ -24,6 +25,7 @@ const searchStart = ref('')
 const searchEnd = ref('')
 const searchStatus = ref('all')
 const autoRefresh = ref(true)
+const loadError = ref('')
 let refreshTimer: number | null = null
 
 function parseTaskIds(ids: string): string[] {
@@ -31,37 +33,38 @@ function parseTaskIds(ids: string): string[] {
 }
 
 async function fetchTaskMeta(ids: string[]) {
-  for (const tid of ids) {
-    if (taskMeta.value[tid]) continue
-    try {
-      const res = await http.get(`/task/${tid}`)
-      taskMeta.value[tid] = { id: tid, type: res.data.task_type, status: res.data.status }
-    } catch {}
-  }
+  await Promise.all(ids.map(async (tid) => {
+    const res = await http.get(`/task/${tid}`)
+    taskMeta.value[tid] = { id: tid, type: res.data.task_type, status: res.data.status }
+  }))
 }
 
 const typeLabel = (t: string) => t === 'website' ? '网站测试' : t === 'video' ? '视频测试' : t === 'download' ? '下载测试' : t === 'ping' ? 'Ping 测试' : t
 const typeColor = (t: string) => t === 'website' ? 'var(--color-primary)' : t === 'video' ? 'var(--color-warning)' : t === 'download' ? 'var(--color-success)' : t === 'ping' ? 'var(--color-info)' : 'var(--text-secondary)'
 
 function handleWsMessage(msg: ProgressMessage) {
-  if (msg.task_id !== planId) return
+  if (!Object.prototype.hasOwnProperty.call(taskMeta.value, msg.task_id)) return
   if (msg.type === 'task_completed' || msg.type === 'task_failed') {
     fetchRuns()
   }
 }
 
 async function fetchRuns() {
+  loadError.value = ''
+  planStore.planRuns = []
+  taskMeta.value = {}
   try {
     const params: any = {}
     if (searchStart.value) params.start = new Date(searchStart.value).toISOString()
     if (searchEnd.value) params.end = new Date(searchEnd.value + 'T23:59:59').toISOString()
-    const res = await planStore.fetchPlanRuns(planId, params)
-    // 抓 task type 信息
+    const res = await planStore.fetchPlanRuns(planId.value, params)
+    const ids = res.flatMap(run => parseTaskIds(run.task_ids))
+    taskMeta.value = Object.fromEntries(Object.entries(taskMeta.value).filter(([id]) => ids.includes(id)))
     for (const run of res) {
       const ids = parseTaskIds(run.task_ids)
       if (ids.length) await fetchTaskMeta(ids)
     }
-  } catch (e) { if (import.meta.env.DEV) console.error('fetchRuns:', e) }
+  } catch (e) { loadError.value = getErrorMessage(e, '加载运行历史失败') }
 }
 
 const filteredRuns = () => {
@@ -91,7 +94,7 @@ async function handleDelete(runId: string, force = false) {
     negativeText: '取消',
     onPositiveClick: async () => {
       try {
-        await planStore.deleteRun(planId, runId, force)
+        await planStore.deleteRun(planId.value, runId, force)
         message.success('已删除')
         fetchRuns()
       } catch (e: any) {
@@ -112,7 +115,7 @@ async function handleBatchDelete() {
     negativeText: '取消',
     onPositiveClick: async () => {
       try {
-        await Promise.all(ids.map(id => planStore.deleteRun(planId, id)))
+        await Promise.all(ids.map(id => planStore.deleteRun(planId.value, id)))
         message.success(`已删除 ${ids.length} 条`)
         fetchRuns()
       } catch (e: any) {
@@ -124,7 +127,7 @@ async function handleBatchDelete() {
 
 async function exportRun(runId: string, format: 'xlsx' | 'csv' | 'json') {
   try {
-    const blob: Blob = await http.get(`/plan/${planId}/run/${runId}/export`, {
+    const blob: Blob = await http.get(`/plan/${planId.value}/run/${runId}/export`, {
       params: { format },
       responseType: 'blob',
     })
@@ -138,17 +141,33 @@ async function exportRun(runId: string, format: 'xlsx' | 'csv' | 'json') {
 }
 
 onMounted(async () => {
-  await planStore.fetchPlan(planId)
-  await fetchRuns()
-  ws.connect(planId)
+  try {
+    await planStore.fetchPlan(planId.value)
+    await fetchRuns()
+  } catch (e) { loadError.value = getErrorMessage(e, '加载计划失败') }
+   // The backend authorizes unfiltered subscriptions to this user's tasks.
+   // A plan run contains child task IDs, not the plan ID itself.
+   ws.connect()
   unsubWs = ws.onMessage(handleWsMessage)
   // 自动刷新（5s 一次）
   refreshTimer = window.setInterval(() => { if (autoRefresh.value) fetchRuns() }, 5000)
 })
 
+watch(planId, async (id, oldId) => {
+  if (id === oldId) return
+  taskMeta.value = {}
+  planStore.planRuns = []
+  try {
+    await planStore.fetchPlan(id)
+    await fetchRuns()
+  } catch (e) { loadError.value = getErrorMessage(e, '加载计划失败') }
+   ws.connect()
+})
+
 onUnmounted(() => {
   if (unsubWs) unsubWs()
   if (refreshTimer) clearInterval(refreshTimer)
+  closeWsClient()
 })
 
 const triggerLabel = (t: string) => t === 'cron' ? '定时' : '手动'
@@ -193,13 +212,16 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
       <button class="btn sm danger" @click="handleBatchDelete">批量删除</button>
     </div>
 
-    <div v-if="planStore.planRuns.length === 0" class="empty-state">
+    <div v-if="loadError" class="empty-state error-state">
+      <h3>{{ loadError }}</h3><button class="btn" @click="fetchRuns">重试</button>
+    </div>
+    <div v-else-if="planStore.planRuns.length === 0" class="empty-state">
       <div class="empty-icon">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       </div><h3>暂无运行历史</h3><p>运行计划后会在此显示结果</p>
     </div>
 
-    <div v-else class="runs-list">
+    <div v-else-if="filteredRuns().length" class="runs-list">
       <div v-for="run in filteredRuns()" :key="run.id" class="run-card">
         <div class="run-header">
           <div class="run-meta">
@@ -250,6 +272,7 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
         </div>
       </div>
     </div>
+    <div v-else class="empty-state"><h3>没有符合筛选条件的运行记录</h3></div>
   </div>
 </template>
 
@@ -284,6 +307,7 @@ const statusText = (s: string) => s === 'completed' ? '已完成' : s === 'runni
 .empty-state { text-align: center; padding: 80px 20px; color: var(--text-secondary); }
 .empty-icon { color: var(--text-tertiary); margin-bottom: 12px; }
 .empty-state h3 { font-size: 16px; color: var(--text-primary); margin-bottom: 4px; }
+.error-state h3 { color: var(--color-danger); }
 
 .runs-list { display: flex; flex-direction: column; gap: 12px; }
 .run-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }

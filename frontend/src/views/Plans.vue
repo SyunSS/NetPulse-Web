@@ -4,12 +4,15 @@ import { useRouter } from 'vue-router'
 import { useDialog, useMessage } from 'naive-ui'
 import { usePlanStore } from '@/stores/plan'
 import { formatTime } from '@/utils'
+import { getErrorMessage } from '@/api/index'
 
 const router = useRouter()
 const message = useMessage()
 const planStore = usePlanStore()
 
 const searchText = ref('')
+const page = ref(1)
+const pageSize = 20
 
 const taskTypeLabel = (t: string) => {
   const map: Record<string, string> = {
@@ -44,8 +47,8 @@ async function handleRun(planId: string, planName: string) {
     const res = await planStore.runPlan(planId)
     message.success(`计划「${planName}」已启动，生成 ${res.task_ids.length} 个任务`)
     router.push(`/plans/${planId}/runs`)
-  } catch (e: any) {
-    message.error(e.message || '执行失败')
+  } catch (e: unknown) {
+    message.error(getErrorMessage(e, '执行失败'))
   }
 }
 
@@ -60,9 +63,9 @@ async function handleDelete(planId: string, planName: string) {
       try {
         await planStore.deletePlan(planId)
         message.success('已删除')
-        await planStore.fetchPlans(1, 20)
-      } catch (e: any) {
-        message.error(e.message || '删除失败')
+         await planStore.fetchPlans(page.value, pageSize)
+      } catch (e: unknown) {
+        message.error(getErrorMessage(e, '删除失败'))
       }
     },
   })
@@ -78,8 +81,18 @@ const filteredPlans = () => {
 }
 
 onMounted(async () => {
-  await planStore.fetchPlans(1, 20)
+  try { await planStore.fetchPlans(page.value, pageSize) } catch { /* store exposes the error */ }
 })
+
+async function changePage(nextPage: number) {
+  if (nextPage < 1 || nextPage > Math.max(1, Math.ceil(planStore.total / pageSize))) return
+  page.value = nextPage
+  await planStore.fetchPlans(page.value, pageSize)
+}
+
+async function reload() {
+  try { await planStore.fetchPlans(page.value, pageSize) } catch { /* store exposes the error */ }
+}
 </script>
 
 <template>
@@ -104,6 +117,11 @@ onMounted(async () => {
     <div v-if="planStore.loading && planStore.plans.length === 0" class="empty-state">
       <div class="empty-spinner"></div>
       <p>加载中...</p>
+    </div>
+
+    <div v-else-if="planStore.error" class="empty-state error-state">
+      <h3>{{ planStore.error }}</h3>
+      <button class="primary-btn" @click="reload">重试</button>
     </div>
 
     <!-- 空状态 -->
@@ -179,6 +197,11 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+    <div v-if="planStore.total > pageSize" class="pagination">
+      <button class="page-btn" :disabled="page === 1" @click="changePage(page - 1)">上一页</button>
+      <span>第 {{ page }} / {{ Math.ceil(planStore.total / pageSize) }} 页</span>
+      <button class="page-btn" :disabled="page >= Math.ceil(planStore.total / pageSize)" @click="changePage(page + 1)">下一页</button>
+    </div>
   </div>
 </template>
 
@@ -247,6 +270,31 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: 20px;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.page-btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.page-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .plan-card {
@@ -439,4 +487,6 @@ onMounted(async () => {
   color: var(--text-secondary);
   margin-bottom: 20px;
 }
+
+.error-state { color: var(--color-danger); }
 </style>

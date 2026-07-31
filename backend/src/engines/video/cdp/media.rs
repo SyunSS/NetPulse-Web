@@ -32,7 +32,9 @@ impl MediaCollector {
                     if parts.len() == 2 {
                         if let (Ok(w), Ok(h)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
                             let _ = self.tx.send(VideoEvent::ResolutionChanged {
-                                width: w, height: h, meta: EventMeta::now(),
+                                width: w,
+                                height: h,
+                                meta: EventMeta::now(),
                             });
                         }
                     }
@@ -40,35 +42,44 @@ impl MediaCollector {
                 "kFps" => {
                     if let Ok(fps) = val.parse::<f64>() {
                         let _ = self.tx.send(VideoEvent::FpsChanged {
-                            fps, meta: EventMeta::now(),
+                            fps,
+                            meta: EventMeta::now(),
                         });
                     }
                 }
                 "kVideoBitrateKbps" => {
                     if let Ok(vbr) = val.parse::<f64>() {
                         let _ = self.tx.send(VideoEvent::BitrateChanged {
-                            video_kbps: vbr, audio_kbps: 0.0, meta: EventMeta::now(),
+                            video_kbps: vbr,
+                            audio_kbps: 0.0,
+                            meta: EventMeta::now(),
                         });
                     }
                 }
                 "kAudioBitrateKbps" => {
                     if let Ok(abr) = val.parse::<f64>() {
                         let _ = self.tx.send(VideoEvent::BitrateChanged {
-                            video_kbps: 0.0, audio_kbps: abr, meta: EventMeta::now(),
+                            video_kbps: 0.0,
+                            audio_kbps: abr,
+                            meta: EventMeta::now(),
                         });
                     }
                 }
                 "kDroppedFrames" => {
                     if let Ok(dropped) = val.parse::<u64>() {
                         let _ = self.tx.send(VideoEvent::DroppedFramesChanged {
-                            dropped, decoded: 0, meta: EventMeta::now(),
+                            dropped,
+                            decoded: 0,
+                            meta: EventMeta::now(),
                         });
                     }
                 }
                 "kDecodedFrames" => {
                     if let Ok(decoded) = val.parse::<u64>() {
                         let _ = self.tx.send(VideoEvent::DroppedFramesChanged {
-                            dropped: 0, decoded, meta: EventMeta::now(),
+                            dropped: 0,
+                            decoded,
+                            meta: EventMeta::now(),
                         });
                     }
                 }
@@ -128,7 +139,9 @@ impl MediaCollector {
                 }
                 "seek" | "seeked" => {
                     let _ = self.tx.send(VideoEvent::Seek {
-                        from_sec: 0.0, to_sec: 0.0, meta: EventMeta::now(),
+                        from_sec: 0.0,
+                        to_sec: 0.0,
+                        meta: EventMeta::now(),
                     });
                 }
                 "pause" => {
@@ -154,11 +167,17 @@ fn parse_codecs(mime: &str) -> (String, String) {
         let codec_str = rest.trim_matches('"');
         for part in codec_str.split(',') {
             let p = part.trim();
-            if p.starts_with("av") || p.starts_with("h264") || p.starts_with("h265")
-                || p.starts_with("vp9") || p.starts_with("vp8") || p.starts_with("hevc")
+            if p.starts_with("av")
+                || p.starts_with("h264")
+                || p.starts_with("h265")
+                || p.starts_with("vp9")
+                || p.starts_with("vp8")
+                || p.starts_with("hevc")
             {
                 vc = p.to_string();
-            } else if p.starts_with("mp4a") || p.starts_with("aac") || p.starts_with("opus")
+            } else if p.starts_with("mp4a")
+                || p.starts_with("aac")
+                || p.starts_with("opus")
                 || p.starts_with("vorbis")
             {
                 ac = p.to_string();

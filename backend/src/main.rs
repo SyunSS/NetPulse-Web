@@ -14,7 +14,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use tokio::sync::{broadcast, mpsc};
-use tower_http::cors::{Any, AllowOrigin, CorsLayer};
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::info;
 
@@ -40,7 +40,10 @@ async fn main() -> anyhow::Result<()> {
             &format!("secret = \"{}\"", random_secret),
         );
         std::fs::write(&config_file, config_content)?;
-        println!("默认配置文件已创建: {}（JWT 密钥已随机生成）", config_file.display());
+        println!(
+            "默认配置文件已创建: {}（JWT 密钥已随机生成）",
+            config_file.display()
+        );
     }
 
     let config = AppConfig::load()?;
@@ -88,8 +91,11 @@ async fn main() -> anyhow::Result<()> {
         rate_limiter,
     };
 
-    let app = api::build_router(state)
-        .layer(CorsLayer::new().allow_origin(AllowOrigin::mirror_request()).allow_methods(Any).allow_headers(Any));
+    // The development server uses Vite's same-origin proxy. Do not reflect
+    // arbitrary origins; deployments that need cross-origin access should
+    // terminate CORS at their trusted reverse proxy.
+    let app =
+        api::build_router(state).layer(CorsLayer::new().allow_methods(Any).allow_headers(Any));
 
     let app = if std::path::Path::new("frontend-dist").exists() {
         info!("前端静态文件模式已启用 (frontend-dist/)");
@@ -104,7 +110,11 @@ async fn main() -> anyhow::Result<()> {
     info!("服务器启动: http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -113,25 +123,42 @@ fn init_logging(log_cfg: &crate::config::LoggingConfig) {
     use tracing_appender::rolling;
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-    let mut filter: EnvFilter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(&log_cfg.level));
-    filter = filter.add_directive("tungstenite=warn".parse().unwrap()).add_directive("chromiumoxide=off".parse().unwrap());
+    let mut filter: EnvFilter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&log_cfg.level));
+    filter = filter
+        .add_directive("tungstenite=warn".parse().unwrap())
+        .add_directive("chromiumoxide=off".parse().unwrap());
 
     let is_json = log_cfg.format.as_str() == "json";
 
     match (log_cfg.console, log_cfg.file) {
         (true, true) => {
             let console_layer: Box<dyn tracing_subscriber::Layer<_> + Send + Sync> = if is_json {
-                Box::new(fmt::layer().json().with_target(false).with_writer(std::io::stdout))
+                Box::new(
+                    fmt::layer()
+                        .json()
+                        .with_target(false)
+                        .with_writer(std::io::stdout),
+                )
             } else {
-                Box::new(fmt::layer().compact().with_target(false).with_writer(std::io::stdout))
+                Box::new(
+                    fmt::layer()
+                        .compact()
+                        .with_target(false)
+                        .with_writer(std::io::stdout),
+                )
             };
             let file_layer: Box<dyn tracing_subscriber::Layer<_> + Send + Sync> = if is_json {
                 let file = rolling::daily(&log_cfg.file_dir, "netpulse.log");
                 Box::new(fmt::layer().json().with_target(false).with_writer(file))
             } else {
                 let file = rolling::daily(&log_cfg.file_dir, "netpulse.log");
-                Box::new(fmt::layer().with_target(false).with_ansi(false).with_writer(file))
+                Box::new(
+                    fmt::layer()
+                        .with_target(false)
+                        .with_ansi(false)
+                        .with_writer(file),
+                )
             };
             tracing_subscriber::registry()
                 .with(console_layer)
@@ -142,12 +169,22 @@ fn init_logging(log_cfg: &crate::config::LoggingConfig) {
         (true, false) => {
             if is_json {
                 tracing_subscriber::registry()
-                    .with(fmt::layer().json().with_target(false).with_writer(std::io::stdout))
+                    .with(
+                        fmt::layer()
+                            .json()
+                            .with_target(false)
+                            .with_writer(std::io::stdout),
+                    )
                     .with(filter)
                     .init();
             } else {
                 tracing_subscriber::registry()
-                    .with(fmt::layer().compact().with_target(false).with_writer(std::io::stdout))
+                    .with(
+                        fmt::layer()
+                            .compact()
+                            .with_target(false)
+                            .with_writer(std::io::stdout),
+                    )
                     .with(filter)
                     .init();
             }
@@ -162,15 +199,18 @@ fn init_logging(log_cfg: &crate::config::LoggingConfig) {
             } else {
                 let file = rolling::daily(&log_cfg.file_dir, "netpulse.log");
                 tracing_subscriber::registry()
-                    .with(fmt::layer().with_target(false).with_ansi(false).with_writer(file))
+                    .with(
+                        fmt::layer()
+                            .with_target(false)
+                            .with_ansi(false)
+                            .with_writer(file),
+                    )
                     .with(filter)
                     .init();
             }
         }
         (false, false) => {
-            tracing_subscriber::registry()
-                .with(filter)
-                .init();
+            tracing_subscriber::registry().with(filter).init();
         }
     }
 }

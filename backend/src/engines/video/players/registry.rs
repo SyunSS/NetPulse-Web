@@ -3,7 +3,9 @@ use std::sync::Arc;
 use chromiumoxide::page::Page;
 use tracing::info;
 
-use super::{bilibili::BilibiliAdapter, generic::GenericHtml5Adapter, youtube::YoutubeAdapter, PlayerAdapter};
+use super::{
+    bilibili::BilibiliAdapter, generic::GenericHtml5Adapter, youtube::YoutubeAdapter, PlayerAdapter,
+};
 
 pub struct PlayerRegistry {
     adapters: Vec<Box<dyn PlayerAdapter>>,

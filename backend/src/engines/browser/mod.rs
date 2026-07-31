@@ -51,28 +51,45 @@ pub struct BrowserEngine {
 
 impl BrowserEngine {
     pub fn new(chrome_config: BrowserConfig, timeout: Duration) -> Self {
-        Self { chrome_config, timeout }
+        Self {
+            chrome_config,
+            timeout,
+        }
     }
 
     /// 测试页面，采集 Performance 指标和截图
     pub async fn test_page(&self, url: &str) -> BrowserResult {
+        match tokio::time::timeout(self.timeout, self.test_page_inner(url)).await {
+            Ok(result) => result,
+            Err(_) => err_result("浏览器测试超时"),
+        }
+    }
+
+    async fn test_page_inner(&self, url: &str) -> BrowserResult {
         info!("浏览器测试开始: {}", url);
         let total_start = std::time::Instant::now();
 
         let browser = match provider::launch_browser(&self.chrome_config).await {
             Ok(b) => b,
-            Err(e) => { error!("浏览器启动失败: {}", e); return err_result(&e.to_string()); }
+            Err(e) => {
+                error!("浏览器启动失败: {}", e);
+                return err_result(&e.to_string());
+            }
         };
         let page = match provider::new_page(&browser).await {
             Ok(p) => p,
-            Err(e) => { error!("创建页面失败: {}", e); return err_result(&e.to_string()); }
+            Err(e) => {
+                error!("创建页面失败: {}", e);
+                return err_result(&e.to_string());
+            }
         };
 
         let page_collector = Arc::new(collectors::PageCollector::new());
 
         page_collector.record_navigation();
         if let Err(e) = page.navigate_to(url).await {
-            error!("导航失败: {}", e); return err_result(&e.to_string());
+            error!("导航失败: {}", e);
+            return err_result(&e.to_string());
         }
         if let Err(e) = page.wait_for_load().await {
             debug!("等待导航完成: {}", e);
@@ -88,13 +105,21 @@ impl BrowserEngine {
         page_collector.record_load();
 
         let perf_js = collectors::NetworkCollector::collect_js();
-        let perf_data: serde_json::Value = page.evaluate(perf_js).await
+        let perf_data: serde_json::Value = page
+            .evaluate(perf_js)
+            .await
             .unwrap_or(serde_json::Value::Null);
         let net_metrics = collectors::NetworkCollector::parse(perf_data.clone());
 
-        let title = page.evaluate("document.title").await.ok()
+        let title = page
+            .evaluate("document.title")
+            .await
+            .ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()));
-        let final_url = page.evaluate("window.location.href").await.ok()
+        let final_url = page
+            .evaluate("window.location.href")
+            .await
+            .ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()));
 
         let screenshot = page.screenshot().await.ok();
@@ -102,16 +127,37 @@ impl BrowserEngine {
         let pg = page_collector.snapshot();
 
         let nav_dns = net_metrics.dns_ms.or_else(|| {
-            perf_data.get("dns").and_then(|v| v.as_f64()).filter(|&x| x > 0.0)
+            perf_data
+                .get("dns")
+                .and_then(|v| v.as_f64())
+                .filter(|&x| x > 0.0)
         });
         let nav_connect = net_metrics.connect_ms.or_else(|| {
-            perf_data.get("connect").and_then(|v| v.as_f64()).filter(|&x| x > 0.0)
+            perf_data
+                .get("connect")
+                .and_then(|v| v.as_f64())
+                .filter(|&x| x > 0.0)
         });
-        let nav_ttfb = perf_data.get("ttfb").and_then(|v| v.as_f64()).filter(|&x| x > 0.0);
-        let nav_lcp = perf_data.get("lcp").and_then(|v| v.as_f64()).filter(|&x| x > 0.0);
-        let nav_fp = perf_data.get("fp").and_then(|v| v.as_f64()).filter(|&x| x > 0.0);
-        let nav_fcp = perf_data.get("fcp").and_then(|v| v.as_f64()).filter(|&x| x > 0.0);
-        let nav_dcl = perf_data.get("dcl").and_then(|v| v.as_f64()).filter(|&x| x > 0.0);
+        let nav_ttfb = perf_data
+            .get("ttfb")
+            .and_then(|v| v.as_f64())
+            .filter(|&x| x > 0.0);
+        let nav_lcp = perf_data
+            .get("lcp")
+            .and_then(|v| v.as_f64())
+            .filter(|&x| x > 0.0);
+        let nav_fp = perf_data
+            .get("fp")
+            .and_then(|v| v.as_f64())
+            .filter(|&x| x > 0.0);
+        let nav_fcp = perf_data
+            .get("fcp")
+            .and_then(|v| v.as_f64())
+            .filter(|&x| x > 0.0);
+        let nav_dcl = perf_data
+            .get("dcl")
+            .and_then(|v| v.as_f64())
+            .filter(|&x| x > 0.0);
 
         BrowserResult {
             fp_ms: nav_fp.or(pg.first_paint),
@@ -121,20 +167,24 @@ impl BrowserEngine {
             page_open_time_ms: Some(nav_elapsed),
             first_paint_ms: nav_fp,
             resource_count: Some(net_metrics.request_count),
-            resource_total_size: Some(net_metrics.total_transfer_size as i32),
-            final_url, page_title: title, screenshot,
+            resource_total_size: Some(net_metrics.total_transfer_size.min(i32::MAX as u64) as i32),
+            final_url,
+            page_title: title,
+            screenshot,
             error: None,
-            html_size: Some(net_metrics.html_size as i32),
-            css_size: Some(net_metrics.css_size as i32),
-            js_size: Some(net_metrics.js_size as i32),
-            image_size: Some(net_metrics.image_size as i32),
-            font_size: Some(net_metrics.font_size as i32),
+            html_size: Some(net_metrics.html_size.min(i32::MAX as u64) as i32),
+            css_size: Some(net_metrics.css_size.min(i32::MAX as u64) as i32),
+            js_size: Some(net_metrics.js_size.min(i32::MAX as u64) as i32),
+            image_size: Some(net_metrics.image_size.min(i32::MAX as u64) as i32),
+            font_size: Some(net_metrics.font_size.min(i32::MAX as u64) as i32),
             total_requests: Some(net_metrics.request_count),
             failed_requests: Some(net_metrics.failed_count),
             lcp_ms: nav_lcp,
             cls: None,
             tti_ms: None,
-            nav_dns_ms: nav_dns, nav_connect_ms: nav_connect, nav_ttfb_ms: nav_ttfb,
+            nav_dns_ms: nav_dns,
+            nav_connect_ms: nav_connect,
+            nav_ttfb_ms: nav_ttfb,
             site_size_kb: Some(net_metrics.site_size_kb),
             avg_speed_kbps: Some(net_metrics.avg_speed_kbps),
             total_speed_kbps: Some(net_metrics.total_speed_kbps),
@@ -145,16 +195,34 @@ impl BrowserEngine {
 
 fn err_result(msg: &str) -> BrowserResult {
     BrowserResult {
-        fp_ms: None, fcp_ms: None, dom_content_loaded_ms: None, load_event_ms: None,
-        page_open_time_ms: None, first_paint_ms: None,
-        resource_count: None, resource_total_size: None,
-        final_url: None, page_title: None, screenshot: None,
+        fp_ms: None,
+        fcp_ms: None,
+        dom_content_loaded_ms: None,
+        load_event_ms: None,
+        page_open_time_ms: None,
+        first_paint_ms: None,
+        resource_count: None,
+        resource_total_size: None,
+        final_url: None,
+        page_title: None,
+        screenshot: None,
         error: Some(msg.to_string()),
-        html_size: None, css_size: None, js_size: None, image_size: None, font_size: None,
-        total_requests: None, failed_requests: None,
-        lcp_ms: None, cls: None, tti_ms: None,
-        nav_dns_ms: None, nav_connect_ms: None, nav_ttfb_ms: None,
-        site_size_kb: None, avg_speed_kbps: None, total_speed_kbps: None,
+        html_size: None,
+        css_size: None,
+        js_size: None,
+        image_size: None,
+        font_size: None,
+        total_requests: None,
+        failed_requests: None,
+        lcp_ms: None,
+        cls: None,
+        tti_ms: None,
+        nav_dns_ms: None,
+        nav_connect_ms: None,
+        nav_ttfb_ms: None,
+        site_size_kb: None,
+        avg_speed_kbps: None,
+        total_speed_kbps: None,
         first_screen_ratio: None,
     }
 }

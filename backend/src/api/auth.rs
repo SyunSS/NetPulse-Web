@@ -1,3 +1,4 @@
+use axum::extract::ConnectInfo;
 use axum::http::HeaderMap;
 use axum::{extract::State, routing::post, Json, Router};
 
@@ -12,28 +13,49 @@ pub fn auth_routes() -> Router<AppState> {
         .route("/login", post(login))
 }
 
-fn client_ip(headers: &HeaderMap) -> String {
-    headers
-        .get("X-Forwarded-For")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').next())
-        .map(|s| s.trim())
-        .or_else(|| {
-            headers
-                .get("X-Real-IP")
-                .and_then(|v| v.to_str().ok())
-        })
-        .unwrap_or("unknown")
-        .to_string()
+fn client_ip(headers: &HeaderMap, peer: std::net::SocketAddr, trusted: &[String]) -> String {
+    let peer_ip = peer.ip();
+    let is_trusted = trusted
+        .iter()
+        .any(|entry| crate::utils::ratelimit::ip_matches(entry, peer_ip));
+    if is_trusted {
+        if let Some(ip) = headers
+            .get("X-Forwarded-For")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| {
+                v.split(',')
+                    .rev()
+                    .filter_map(|value| value.trim().parse::<std::net::IpAddr>().ok())
+                    .find(|forwarded_ip| {
+                        !trusted
+                            .iter()
+                            .any(|entry| crate::utils::ratelimit::ip_matches(entry, *forwarded_ip))
+                    })
+            })
+        {
+            return ip.to_string();
+        }
+        if let Some(ip) = headers
+            .get("X-Real-IP")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+        {
+            if ip.parse::<std::net::IpAddr>().is_ok() {
+                return ip.to_string();
+            }
+        }
+    }
+    peer_ip.to_string()
 }
 
 /// 用户注册
 async fn register(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     headers: HeaderMap,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<crate::utils::response::ApiResponse<crate::models::user::UserInfo>>, AppError> {
-    let ip = client_ip(&headers);
+    let ip = client_ip(&headers, peer, &state.config.server.trusted_proxies);
     if !state.rate_limiter.check(&format!("register:{}", ip)) {
         return Err(AppError::bad_request("请求过于频繁，请稍后再试"));
     }
@@ -46,10 +68,12 @@ async fn register(
 /// 用户登录
 async fn login(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     headers: HeaderMap,
     Json(req): Json<LoginRequest>,
-) -> Result<Json<crate::utils::response::ApiResponse<crate::models::user::LoginResponse>>, AppError> {
-    let ip = client_ip(&headers);
+) -> Result<Json<crate::utils::response::ApiResponse<crate::models::user::LoginResponse>>, AppError>
+{
+    let ip = client_ip(&headers, peer, &state.config.server.trusted_proxies);
     if !state.rate_limiter.check(&format!("login:{}", ip)) {
         return Err(AppError::bad_request("请求过于频繁，请稍后再试"));
     }

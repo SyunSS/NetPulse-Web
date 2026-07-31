@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::models::task::{
     CreateTaskRequest, CreateTaskResponse, DownloadResult, TestTask, VideoResult, WebsiteResult,
 };
-use crate::utils::response::{ProgressMessage, TaskJob};
+use crate::utils::response::TaskJob;
 
 /// 任务业务逻辑服务
 pub struct TaskService;
@@ -48,7 +48,15 @@ impl TaskService {
             options: req.options.clone(),
         };
 
-        task_tx.send(job).await?;
+        if let Err(error) = task_tx.send(job).await {
+            let _ = sqlx::query("UPDATE test_task SET status = 'failed', finished_at = ?, error_msg = ? WHERE id = ? AND status = 'pending'")
+                .bind(Utc::now().to_rfc3339())
+                .bind(format!("任务派发失败: {error}"))
+                .bind(&task_id)
+                .execute(db)
+                .await;
+            return Err(anyhow::anyhow!("任务派发失败: {error}"));
+        }
 
         Ok(CreateTaskResponse {
             task_id,
@@ -73,7 +81,9 @@ impl TaskService {
         page: u32,
         size: u32,
     ) -> anyhow::Result<(Vec<TestTask>, u32)> {
-        let offset = (page.max(1) - 1) * size;
+        let page = page.max(1);
+        let size = size.clamp(1, 100);
+        let offset = page.saturating_sub(1).saturating_mul(size);
 
         let total: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM test_task WHERE user_id = ?")
             .bind(user_id)
@@ -153,15 +163,15 @@ impl TaskService {
         db: &SqlitePool,
         cancel_tx: &tokio::sync::broadcast::Sender<String>,
         task_id: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         let now = Utc::now().to_rfc3339();
-        sqlx::query("UPDATE test_task SET status = 'cancelled', finished_at = ? WHERE id = ? AND status IN ('pending', 'running')")
+        let result = sqlx::query("UPDATE test_task SET status = 'cancelled', finished_at = ? WHERE id = ? AND status IN ('pending', 'running')")
             .bind(&now)
             .bind(task_id)
             .execute(db)
             .await?;
         let _ = cancel_tx.send(task_id.to_string());
-        Ok(())
+        Ok(result.rows_affected() == 1)
     }
 
     /// 重试任务
@@ -209,7 +219,15 @@ impl TaskService {
             options: config["options"].clone(),
         };
 
-        task_tx.send(job).await?;
+        if let Err(error) = task_tx.send(job).await {
+            let _ = sqlx::query("UPDATE test_task SET status = 'failed', finished_at = ?, error_msg = ? WHERE id = ? AND status = 'pending'")
+                .bind(Utc::now().to_rfc3339())
+                .bind(format!("任务派发失败: {error}"))
+                .bind(&new_task_id)
+                .execute(db)
+                .await;
+            return Err(anyhow::anyhow!("任务派发失败: {error}"));
+        }
 
         Ok(CreateTaskResponse {
             task_id: new_task_id,
@@ -303,10 +321,7 @@ impl TaskService {
     }
 
     /// 获取趋势数据（最近 10 条网站测试结果）
-    async fn get_trend_data(
-        db: &SqlitePool,
-        user_id: &str,
-    ) -> anyhow::Result<Vec<TrendPoint>> {
+    async fn get_trend_data(db: &SqlitePool, user_id: &str) -> anyhow::Result<Vec<TrendPoint>> {
         let results = sqlx::query_as::<_, TrendRow>(
             "SELECT created_at, dns_time_ms, ttfb_ms, page_open_time_ms FROM website_result
              WHERE dns_time_ms IS NOT NULL AND task_id IN (SELECT id FROM test_task WHERE user_id = ?)
@@ -316,12 +331,16 @@ impl TaskService {
         .fetch_all(db)
         .await?;
 
-        Ok(results.into_iter().rev().map(|r| TrendPoint {
-            time: r.created_at,
-            dns_ms: r.dns_time_ms.unwrap_or(0.0),
-            ttfb_ms: r.ttfb_ms.unwrap_or(0.0),
-            page_ms: r.page_open_time_ms.unwrap_or(0.0),
-        }).collect())
+        Ok(results
+            .into_iter()
+            .rev()
+            .map(|r| TrendPoint {
+                time: r.created_at,
+                dns_ms: r.dns_time_ms.unwrap_or(0.0),
+                ttfb_ms: r.ttfb_ms.unwrap_or(0.0),
+                page_ms: r.page_open_time_ms.unwrap_or(0.0),
+            })
+            .collect())
     }
 }
 

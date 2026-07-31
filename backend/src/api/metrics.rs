@@ -8,8 +8,7 @@ use crate::services::auth_service::Claims;
 use crate::utils::response::{ok, AppError, AppState};
 
 pub fn metrics_routes() -> Router<AppState> {
-    Router::new()
-        .route("/metrics", get(list_metrics))
+    Router::new().route("/metrics", get(list_metrics))
 }
 
 /// 获取所有可用指标定义
@@ -18,7 +17,7 @@ async fn list_metrics(
     Extension(_claims): Extension<Claims>,
 ) -> Result<Json<crate::utils::response::ApiResponse<Vec<MetricDefinition>>>, AppError> {
     let metrics = sqlx::query_as::<_, MetricDefinition>(
-        "SELECT * FROM metric_definition ORDER BY category, name"
+        "SELECT * FROM metric_definition ORDER BY category, name",
     )
     .fetch_all(&state.db)
     .await

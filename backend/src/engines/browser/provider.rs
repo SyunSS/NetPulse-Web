@@ -28,8 +28,7 @@ impl ChromiumPage {
 
     pub async fn screenshot(&self) -> anyhow::Result<Vec<u8>> {
         let params = ScreenshotParams::builder().build();
-        let screenshot = self.page.screenshot(params).await
-            .context("截图失败")?;
+        let screenshot = self.page.screenshot(params).await.context("截图失败")?;
         Ok(screenshot)
     }
 
@@ -49,24 +48,25 @@ pub async fn launch_browser(config: &BrowserConfig) -> anyhow::Result<chromiumox
         builder = builder.with_head();
     }
 
-    let launch_config = builder.build()
+    let launch_config = builder
+        .build()
         .map_err(|e| anyhow::anyhow!("构建 BrowserConfig 失败: {}", e))?;
 
-    let (browser, mut handler) = chromiumoxide::Browser::launch(launch_config).await
+    let (browser, mut handler) = chromiumoxide::Browser::launch(launch_config)
+        .await
         .context("浏览器启动失败")?;
 
-    tokio::spawn(async move {
-        loop {
-            let _ = futures::StreamExt::next(&mut handler).await;
-        }
-    });
+    tokio::spawn(async move { while futures::StreamExt::next(&mut handler).await.is_some() {} });
 
     debug!("Chromiumoxide 浏览器已启动");
     Ok(browser)
 }
 
 pub async fn new_page(browser: &chromiumoxide::Browser) -> anyhow::Result<ChromiumPage> {
-    let page = browser.new_page("about:blank").await.context("创建页面失败")?;
+    let page = browser
+        .new_page("about:blank")
+        .await
+        .context("创建页面失败")?;
     debug!("新页面已创建");
     Ok(ChromiumPage { page })
 }

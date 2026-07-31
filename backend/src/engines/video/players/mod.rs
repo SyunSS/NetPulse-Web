@@ -1,7 +1,7 @@
-pub mod generic;
 pub mod bilibili;
-pub mod youtube;
+pub mod generic;
 pub mod registry;
+pub mod youtube;
 
 use chromiumoxide::page::Page;
 

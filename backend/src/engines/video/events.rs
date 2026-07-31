@@ -7,7 +7,9 @@ pub struct EventMeta {
 
 impl EventMeta {
     pub fn now() -> Self {
-        Self { timestamp: Instant::now() }
+        Self {
+            timestamp: Instant::now(),
+        }
     }
 }
 

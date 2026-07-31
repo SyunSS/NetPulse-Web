@@ -6,11 +6,12 @@ use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::models::plan::TaskPlan;
 use crate::models::plan::TaskPlanItem;
+use crate::services::plan_service::{prepare_plan_item, PlanService};
 use crate::utils::response::{ProgressMessage, TaskJob};
 
 /// 计划调度器 — 后台守护进程，每分钟检查到期计划
@@ -27,12 +28,16 @@ impl PlanScheduler {
         task_tx: mpsc::Sender<TaskJob>,
         progress_tx: broadcast::Sender<ProgressMessage>,
     ) -> Self {
-        Self { db, task_tx, progress_tx, running_plans: Arc::new(Mutex::new(HashSet::new())) }
+        Self {
+            db,
+            task_tx,
+            progress_tx,
+            running_plans: Arc::new(Mutex::new(HashSet::new())),
+        }
     }
 
     /// 启动调度器后台任务
     pub fn start(self) -> JoinHandle<()> {
-        let running_plans = self.running_plans.clone();
         tokio::spawn(async move {
             info!("PlanScheduler 启动，每 60 秒检查一次");
             let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -50,6 +55,7 @@ impl PlanScheduler {
 
     /// 单次调度检查
     async fn tick(&self) -> anyhow::Result<()> {
+        self.reconcile_running_runs().await?;
         let plans = sqlx::query_as::<_, TaskPlan>(
             "SELECT * FROM task_plans WHERE enabled = 1 AND cron_expression IS NOT NULL",
         )
@@ -95,6 +101,26 @@ impl PlanScheduler {
         let now = Utc::now().to_rfc3339();
         let plan_run_id = Uuid::new_v4().to_string();
 
+        let items = sqlx::query_as::<_, TaskPlanItem>(
+            "SELECT * FROM task_plan_items WHERE plan_id = ? ORDER BY order_index ASC",
+        )
+        .bind(&plan.id)
+        .fetch_all(&self.db)
+        .await?;
+        if items.is_empty() {
+            anyhow::bail!("计划无测试项");
+        }
+        let mut tx = self.db.begin().await?;
+        let active: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM task_plan_runs WHERE plan_id = ? AND status IN ('pending', 'running')",
+        )
+        .bind(&plan.id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if active > 0 {
+            return Ok(());
+        }
+
         // 创建 plan_run
         sqlx::query(
             "INSERT INTO task_plan_runs (id, plan_id, triggered_by, started_at, status, created_at) VALUES (?, ?, ?, ?, 'running', ?)",
@@ -104,7 +130,7 @@ impl PlanScheduler {
         .bind(triggered_by)
         .bind(&now)
         .bind(&now)
-        .execute(&self.db)
+        .execute(&mut *tx)
         .await?;
 
         // 推送计划开始
@@ -114,36 +140,11 @@ impl PlanScheduler {
             message: format!("[cron] 执行计划: {}", plan.name),
         });
 
-        // 加载 items
-        let items = sqlx::query_as::<_, TaskPlanItem>(
-            "SELECT * FROM task_plan_items WHERE plan_id = ? ORDER BY order_index ASC",
-        )
-        .bind(&plan.id)
-        .fetch_all(&self.db)
-        .await?;
-
-        if items.is_empty() {
-            warn!("计划 {} 无测试项，跳过", plan.name);
-            let _ = sqlx::query("UPDATE task_plan_runs SET status = 'failed', finished_at = ? WHERE id = ?")
-                .bind(&now)
-                .bind(&plan_run_id)
-                .execute(&self.db)
-                .await;
-            return Ok(());
-        }
-
         // 为每个 item 创建 task 并派发
         let mut all_task_ids: Vec<String> = Vec::new();
         for item in &items {
             let task_id = Uuid::new_v4().to_string();
-            // 合并 repeat_count 到 options
-            let mut opts: serde_json::Value = serde_json::from_str(
-                item.options.as_deref().unwrap_or("null")
-            ).unwrap_or(serde_json::Value::Null);
-            if opts.is_null() { opts = serde_json::json!({}); }
-            opts["repeat_count"] = serde_json::json!(item.repeat_count);
-
-            let urls: Vec<String> = serde_json::from_str(&item.urls).unwrap_or_default();
+            let (urls, opts) = prepare_plan_item(item)?;
 
             let config = serde_json::json!({
                 "plan_id": plan.id,
@@ -157,49 +158,87 @@ impl PlanScheduler {
             )
             .bind(&task_id).bind(&plan.user_id).bind(&item.task_type)
             .bind(config.to_string()).bind(&now)
-            .execute(&self.db).await?;
-            let job = TaskJob {
-                task_id: task_id.clone(), user_id: plan.user_id.clone(),
-                task_type: item.task_type.clone(), urls,
-                options: opts,
-            };
-            if let Err(e) = self.task_tx.send(job).await {
-                error!("派发失败: {}", e);
-            }
+            .execute(&mut *tx).await?;
             all_task_ids.push(task_id);
         }
 
         // 一次性写入所有 task_ids JSON
         let task_ids_json = serde_json::to_string(&all_task_ids).unwrap_or_default();
-        let _ = sqlx::query("UPDATE task_plan_runs SET task_ids = ? WHERE id = ?")
-            .bind(&task_ids_json).bind(&plan_run_id)
-            .execute(&self.db).await;
-
-        // 更新 last_run_at
-        let _ = sqlx::query("UPDATE test_task SET status = 'pending' WHERE id IN (SELECT task_id FROM task_plan_runs WHERE id = ?)")
+        sqlx::query("UPDATE task_plan_runs SET task_ids = ? WHERE id = ?")
+            .bind(&task_ids_json)
             .bind(&plan_run_id)
-            .execute(&self.db)
-            .await;
+            .execute(&mut *tx)
+            .await?;
 
         // 更新 last_run_at
-        let _ = sqlx::query("UPDATE task_plans SET last_run_at = ? WHERE id = ?")
+        sqlx::query("UPDATE task_plans SET last_run_at = ? WHERE id = ?")
             .bind(&now)
             .bind(&plan.id)
-            .execute(&self.db)
-            .await;
+            .execute(&mut *tx)
+            .await?;
 
         // 更新下次执行时间
         if let Some(cron_expr) = &plan.cron_expression {
             if let Some(new_next) = compute_next_run(cron_expr, &now) {
-                let _ = sqlx::query("UPDATE task_plans SET next_run_at = ? WHERE id = ?")
+                sqlx::query("UPDATE task_plans SET next_run_at = ? WHERE id = ?")
                     .bind(&new_next)
                     .bind(&plan.id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+
+        tx.commit().await?;
+        for (item, task_id) in items.iter().zip(all_task_ids.iter()) {
+            let (urls, opts) = prepare_plan_item(item)?;
+            if let Err(e) = self
+                .task_tx
+                .send(TaskJob {
+                    task_id: task_id.clone(),
+                    user_id: plan.user_id.clone(),
+                    task_type: item.task_type.clone(),
+                    urls,
+                    options: opts,
+                })
+                .await
+            {
+                error!("派发失败: {}", e);
+                let _ = sqlx::query("UPDATE test_task SET status='failed', finished_at=?, error_msg=? WHERE id=? AND status='pending'")
+                    .bind(Utc::now().to_rfc3339())
+                    .bind(format!("任务派发失败: {e}"))
+                    .bind(task_id)
                     .execute(&self.db)
                     .await;
             }
         }
-
         info!("定时执行计划成功: {} ({} 个测试项)", plan.name, items.len());
+        Ok(())
+    }
+
+    async fn reconcile_running_runs(&self) -> anyhow::Result<()> {
+        let runs = sqlx::query_as::<_, crate::models::plan::TaskPlanRun>(
+            "SELECT * FROM task_plan_runs WHERE status IN ('pending', 'running')",
+        )
+        .fetch_all(&self.db)
+        .await?;
+        for run in runs {
+            let ids: Vec<String> = serde_json::from_str(&run.task_ids).unwrap_or_default();
+            if ids.is_empty() {
+                continue;
+            }
+            let placeholders = vec!["?"; ids.len()].join(",");
+            let query_sql = format!(
+                "SELECT COUNT(*) FROM test_task WHERE id IN ({}) AND status IN ('completed','failed','cancelled')",
+                placeholders
+            );
+            let mut query = sqlx::query_scalar::<_, i64>(&query_sql);
+            for id in &ids {
+                query = query.bind(id);
+            }
+            if query.fetch_one(&self.db).await? == ids.len() as i64 {
+                PlanService::complete_plan_run(&self.db, &run.id, "completed").await?;
+            }
+        }
         Ok(())
     }
 }

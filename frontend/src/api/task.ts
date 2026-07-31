@@ -124,6 +124,7 @@ export interface PingResult {
   success: number | null
   error_msg: string | null
   method: string | null
+  test_count: number | null
   created_at: string
 }
 

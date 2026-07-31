@@ -1,6 +1,4 @@
-use chromiumoxide::cdp::browser_protocol::performance::{
-    EventMetrics,
-};
+use chromiumoxide::cdp::browser_protocol::performance::EventMetrics;
 
 pub struct PerformanceCollector;
 

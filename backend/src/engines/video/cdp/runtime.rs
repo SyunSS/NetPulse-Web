@@ -17,7 +17,9 @@ impl RuntimeCollector {
             event.r#type,
             chromiumoxide::cdp::js_protocol::runtime::ConsoleApiCalledType::Error
         );
-        let text = event.args.iter()
+        let text = event
+            .args
+            .iter()
             .find_map(|arg| arg.value.as_ref().map(|v| v.to_string()))
             .unwrap_or_default();
 

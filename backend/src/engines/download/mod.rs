@@ -7,6 +7,8 @@ use tokio::net::TcpStream;
 use tracing::{debug, info, warn};
 use url::Url;
 
+use crate::utils::url::validate_url_safety;
+
 /// 下载测试结果（含 DNS/TCP 探测）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadTestResult {
@@ -30,12 +32,19 @@ pub struct DownloadEngine {
 
 impl DownloadEngine {
     pub fn new(timeout: Duration) -> Self {
-        Self { timeout, max_duration: Duration::from_secs(15) }
+        Self {
+            timeout,
+            max_duration: Duration::from_secs(15),
+        }
     }
 
     /// 执行下载测试（含 DNS + TCP 预探测）
     pub async fn test_download(&self, url_str: &str) -> DownloadTestResult {
         info!("下载测试开始: {}", url_str);
+
+        if let Err(error) = validate_url_safety(url_str, self.timeout).await {
+            return download_err("URL 不安全", &error, 0.0, 0, 0.0);
+        }
 
         // 1. DNS + TCP 预探测
         let (dns_time, dns_success, tcp_time) = probe_dns_tcp(url_str).await;
@@ -43,62 +52,121 @@ impl DownloadEngine {
         // 2. HTTP 下载
         let client = match reqwest::Client::builder()
             .timeout(self.timeout)
-            .redirect(reqwest::redirect::Policy::limited(5))
+            // Redirect destinations must be validated before connecting. The
+            // download engine has no way to bind reqwest to a checked address,
+            // so fail closed instead of following an unchecked redirect.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
         {
             Ok(c) => c,
-            Err(e) => return download_err("创建客户端失败", &e.to_string(), dns_time, dns_success, tcp_time),
+            Err(e) => {
+                return download_err(
+                    "创建客户端失败",
+                    &e.to_string(),
+                    dns_time,
+                    dns_success,
+                    tcp_time,
+                )
+            }
         };
 
         let response = match client.get(url_str).send().await {
             Ok(r) => r,
-            Err(e) => return download_err("请求失败", &e.to_string(), dns_time, dns_success, tcp_time),
+            Err(e) => {
+                return download_err("请求失败", &e.to_string(), dns_time, dns_success, tcp_time)
+            }
         };
 
         if !response.status().is_success() {
-            return download_err("HTTP错误", &format!("{}", response.status().as_u16()),
-                dns_time, dns_success, tcp_time);
+            return download_err(
+                "HTTP错误",
+                &format!("{}", response.status().as_u16()),
+                dns_time,
+                dns_success,
+                tcp_time,
+            );
         }
 
         // 流式下载 + 分段计速
-        let mut total_bytes = 0u64; let mut peak_speed = 0.0f64;
+        let mut total_bytes = 0u64;
+        let mut peak_speed = 0.0f64;
         let mut speed_samples: Vec<f64> = Vec::new();
-        let mut segment_bytes = 0u64; let mut last_report = Instant::now();
+        let mut segment_bytes = 0u64;
+        let mut last_report = Instant::now();
         let download_start = Instant::now();
         let mut stream = response.bytes_stream();
 
+        let mut stream_error = None;
+        let mut truncated = false;
         while let Some(chunk) = stream.next().await {
-            let chunk = match chunk { Ok(c) => c, Err(e) => { warn!("流错误: {}", e); break; } };
-            let len = chunk.len() as u64; total_bytes += len; segment_bytes += len;
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("流错误: {}", e);
+                    stream_error = Some(e.to_string());
+                    break;
+                }
+            };
+            let len = chunk.len() as u64;
+            total_bytes += len;
+            segment_bytes += len;
             let elapsed = last_report.elapsed();
             if elapsed >= Duration::from_secs(1) {
                 let speed = segment_bytes as f64 / elapsed.as_secs_f64() / 1024.0;
                 speed_samples.push(speed);
-                if speed > peak_speed { peak_speed = speed; }
-                segment_bytes = 0; last_report = Instant::now();
+                if speed > peak_speed {
+                    peak_speed = speed;
+                }
+                segment_bytes = 0;
+                last_report = Instant::now();
             }
-            if download_start.elapsed() >= self.max_duration { break; }
+            if download_start.elapsed() >= self.max_duration {
+                truncated = true;
+                break;
+            }
         }
         if segment_bytes > 0 {
             let elapsed = last_report.elapsed().as_secs_f64();
             if elapsed > 0.01 {
                 let speed = segment_bytes as f64 / elapsed / 1024.0;
-                speed_samples.push(speed); if speed > peak_speed { peak_speed = speed; }
+                speed_samples.push(speed);
+                if speed > peak_speed {
+                    peak_speed = speed;
+                }
             }
         }
 
         let elapsed_ms = download_start.elapsed().as_secs_f64() * 1000.0;
         let avg_speed = if elapsed_ms > 0.0 && total_bytes > 0 {
             total_bytes as f64 / (elapsed_ms / 1000.0) / 1024.0
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         let current_speed = speed_samples.last().copied().unwrap_or(avg_speed);
 
+        if let Some(error) = stream_error {
+            return download_err("流读取失败", &error, dns_time, dns_success, tcp_time);
+        }
+        if truncated {
+            return download_err(
+                "下载超时",
+                "达到最大下载时长",
+                dns_time,
+                dns_success,
+                tcp_time,
+            );
+        }
         DownloadTestResult {
-            download_speed: current_speed, avg_speed, peak_speed,
-            download_time_ms: elapsed_ms, file_size: total_bytes as i32,
-            dns_time_ms: Some(dns_time), dns_success: Some(dns_success),
+            download_speed: current_speed,
+            avg_speed,
+            peak_speed,
+            download_time_ms: elapsed_ms,
+            file_size: total_bytes.min(i32::MAX as u64) as i32,
+            dns_time_ms: Some(dns_time),
+            dns_success: Some(dns_success),
             tcp_time_ms: Some(tcp_time),
-            success: true, error: None,
+            success: true,
+            error: None,
         }
     }
 }
@@ -110,14 +178,23 @@ async fn probe_dns_tcp(url_str: &str) -> (f64, i32, f64) {
         Err(_) => return (0.0, 0, 0.0),
     };
     let host = url.host_str().unwrap_or("");
-    let port = url.port().unwrap_or(if url.scheme() == "https" { 443 } else { 80 });
+    let port = url
+        .port()
+        .unwrap_or(if url.scheme() == "https" { 443 } else { 80 });
 
     // DNS 解析
     let dns_start = Instant::now();
-    let addr_str = format!("{}:{}", host, port);
-    let dns_result = tokio::task::spawn_blocking(move || addr_str.to_socket_addrs()
-        .ok().and_then(|mut a| a.next())
-    ).await.ok().flatten();
+    let addr_str = if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[{}]:{}", host, port)
+    } else {
+        format!("{}:{}", host, port)
+    };
+    let dns_result = tokio::task::spawn_blocking(move || {
+        addr_str.to_socket_addrs().ok().and_then(|mut a| a.next())
+    })
+    .await
+    .ok()
+    .flatten();
     let dns_time = dns_start.elapsed().as_secs_f64() * 1000.0;
     let dns_success = if dns_result.is_some() { 100 } else { 0 };
 
@@ -128,16 +205,30 @@ async fn probe_dns_tcp(url_str: &str) -> (f64, i32, f64) {
             Ok(Ok(_)) => start.elapsed().as_secs_f64() * 1000.0,
             _ => 0.0,
         }
-    } else { 0.0 };
+    } else {
+        0.0
+    };
 
     (dns_time, dns_success, tcp_time)
 }
 
-fn download_err(kind: &str, msg: &str, dns_time: f64, dns_success: i32, tcp_time: f64) -> DownloadTestResult {
+fn download_err(
+    kind: &str,
+    msg: &str,
+    dns_time: f64,
+    dns_success: i32,
+    tcp_time: f64,
+) -> DownloadTestResult {
     DownloadTestResult {
-        download_speed: 0.0, avg_speed: 0.0, peak_speed: 0.0,
-        download_time_ms: 0.0, file_size: 0,
-        dns_time_ms: Some(dns_time), dns_success: Some(dns_success), tcp_time_ms: Some(tcp_time),
-        success: false, error: Some(format!("{}: {}", kind, msg)),
+        download_speed: 0.0,
+        avg_speed: 0.0,
+        peak_speed: 0.0,
+        download_time_ms: 0.0,
+        file_size: 0,
+        dns_time_ms: Some(dns_time),
+        dns_success: Some(dns_success),
+        tcp_time_ms: Some(tcp_time),
+        success: false,
+        error: Some(format!("{}: {}", kind, msg)),
     }
 }

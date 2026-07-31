@@ -5,7 +5,7 @@ use axum::Router;
 use serde::Deserialize;
 
 use crate::models::plan::{
-    CreatePlanRequest, PlanListResponse, PlanWithItems, PlanRunWithTasks, RunPlanResponse,
+    CreatePlanRequest, PlanListResponse, PlanRunWithTasks, PlanWithItems, RunPlanResponse,
     UpdatePlanRequest,
 };
 use crate::services::auth_service::Claims;
@@ -154,10 +154,11 @@ async fn list_plan_runs(
         return Err(AppError::unauthorized("无权访问此计划"));
     }
     let runs = PlanService::list_plan_runs_filtered(
-        &state.db, &plan_id,
+        &state.db,
+        &plan_id,
         q.start.as_deref(),
         q.end.as_deref(),
-        q.limit.unwrap_or(50),
+        q.limit.unwrap_or(50).clamp(1, 100),
     )
     .await
     .map_err(|e| AppError::internal(&e.to_string()))?;
@@ -172,9 +173,16 @@ async fn delete_plan_run(
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<crate::utils::response::ApiResponse<()>>, AppError> {
     let force = params.get("force").map(|s| s.as_str()) == Some("true");
-    PlanService::delete_plan_run(&state.db, &claims.sub, &plan_id, &run_id, force)
-        .await
-        .map_err(|e| AppError::bad_request(&e.to_string()))?;
+    PlanService::delete_plan_run(
+        &state.db,
+        &state.cancel_tx,
+        &claims.sub,
+        &plan_id,
+        &run_id,
+        force,
+    )
+    .await
+    .map_err(|e| AppError::bad_request(&e.to_string()))?;
     Ok(Json(ok_with_msg("运行记录已删除", ())))
 }
 
@@ -222,13 +230,12 @@ async fn export_plan_run(
 
     for tid in &task_ids {
         // 查 task 类型
-        let task_row: Option<(String, String)> = sqlx::query_as(
-            "SELECT task_type, status FROM test_task WHERE id = ?",
-        )
-        .bind(tid)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| AppError::internal(&e.to_string()))?;
+        let task_row: Option<(String, String)> =
+            sqlx::query_as("SELECT task_type, status FROM test_task WHERE id = ?")
+                .bind(tid)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|e| AppError::internal(&e.to_string()))?;
 
         if let Some((task_type, status)) = task_row {
             // 查每种类型的 url（用测试结果的 url/host 字段）
@@ -278,43 +285,39 @@ async fn export_plan_run(
             // 查结果
             match task_type.as_str() {
                 "website" => {
-                    let results: Vec<crate::models::task::WebsiteResult> = sqlx::query_as(
-                        "SELECT * FROM website_result WHERE task_id = ?",
-                    )
-                    .bind(tid)
-                    .fetch_all(&state.db)
-                    .await
-                    .map_err(|e| AppError::internal(&e.to_string()))?;
+                    let results: Vec<crate::models::task::WebsiteResult> =
+                        sqlx::query_as("SELECT * FROM website_result WHERE task_id = ?")
+                            .bind(tid)
+                            .fetch_all(&state.db)
+                            .await
+                            .map_err(|e| AppError::internal(&e.to_string()))?;
                     website_data.extend(results);
                 }
                 "video" => {
-                    let results: Vec<crate::models::task::VideoResult> = sqlx::query_as(
-                        "SELECT * FROM video_result WHERE task_id = ?",
-                    )
-                    .bind(tid)
-                    .fetch_all(&state.db)
-                    .await
-                    .map_err(|e| AppError::internal(&e.to_string()))?;
+                    let results: Vec<crate::models::task::VideoResult> =
+                        sqlx::query_as("SELECT * FROM video_result WHERE task_id = ?")
+                            .bind(tid)
+                            .fetch_all(&state.db)
+                            .await
+                            .map_err(|e| AppError::internal(&e.to_string()))?;
                     video_data.extend(results);
                 }
                 "download" => {
-                    let results: Vec<crate::models::task::DownloadResult> = sqlx::query_as(
-                        "SELECT * FROM download_result WHERE task_id = ?",
-                    )
-                    .bind(tid)
-                    .fetch_all(&state.db)
-                    .await
-                    .map_err(|e| AppError::internal(&e.to_string()))?;
+                    let results: Vec<crate::models::task::DownloadResult> =
+                        sqlx::query_as("SELECT * FROM download_result WHERE task_id = ?")
+                            .bind(tid)
+                            .fetch_all(&state.db)
+                            .await
+                            .map_err(|e| AppError::internal(&e.to_string()))?;
                     download_data.extend(results);
                 }
                 "ping" => {
-                    let results: Vec<crate::models::task::PingResult> = sqlx::query_as(
-                        "SELECT * FROM ping_result WHERE task_id = ?",
-                    )
-                    .bind(tid)
-                    .fetch_all(&state.db)
-                    .await
-                    .map_err(|e| AppError::internal(&e.to_string()))?;
+                    let results: Vec<crate::models::task::PingResult> =
+                        sqlx::query_as("SELECT * FROM ping_result WHERE task_id = ?")
+                            .bind(tid)
+                            .fetch_all(&state.db)
+                            .await
+                            .map_err(|e| AppError::internal(&e.to_string()))?;
                     ping_data.extend(results);
                 }
                 _ => {}
@@ -328,8 +331,14 @@ async fn export_plan_run(
             use crate::report::excel;
             let dir = &state.config.storage.excel_dir;
             let path = excel::export_plan_run_xlsx(
-                &task_summaries, &website_data, &video_data, &download_data, &ping_data,
-                &plan_id, &run_id, dir,
+                &task_summaries,
+                &website_data,
+                &video_data,
+                &download_data,
+                &ping_data,
+                &plan_id,
+                &run_id,
+                dir,
             )
             .map_err(|e| AppError::internal(&e.to_string()))?;
             std::fs::read(&path).map_err(|e| AppError::internal(&e.to_string()))?
@@ -340,51 +349,135 @@ async fn export_plan_run(
                 let mut wtr = csv::Writer::from_writer(&mut buf);
                 // 梗概
                 wtr.write_record(&["=== 任务梗概 ==="]).ok();
-                wtr.write_record(&["task_type", "task_id", "status", "url"]).ok();
+                wtr.write_record(&["task_type", "task_id", "status", "url"])
+                    .ok();
                 for s in &task_summaries {
-                    wtr.write_record(&[&s.task_type, &s.task_id, &s.status, &s.url]).ok();
+                    wtr.write_record(&[&s.task_type, &s.task_id, &s.status, &s.url])
+                        .ok();
                 }
                 // 网站结果
                 if !website_data.is_empty() {
                     wtr.write_record(&[""]).ok();
                     wtr.write_record(&["=== 网站测试结果 ==="]).ok();
-                    wtr.write_record(&["URL","DNS时延","TCP时延","TLS时延","HTTP状态","TTFB","DOM加载","Load事件","总请求","HTML(B)","CSS(B)","JS(B)","图片(B)","字体(B)"]).ok();
+                    wtr.write_record(&[
+                        "URL",
+                        "DNS时延",
+                        "TCP时延",
+                        "TLS时延",
+                        "HTTP状态",
+                        "TTFB",
+                        "DOM加载",
+                        "Load事件",
+                        "总请求",
+                        "HTML(B)",
+                        "CSS(B)",
+                        "JS(B)",
+                        "图片(B)",
+                        "字体(B)",
+                    ])
+                    .ok();
                     for r in &website_data {
                         wtr.serialize((
-                            &r.url, r.dns_time_ms, r.tcp_time_ms, r.tls_time_ms, r.http_status,
-                            r.ttfb_ms, r.dom_content_loaded_ms, r.load_event_ms,
-                            r.total_requests, r.html_size, r.css_size, r.js_size, r.image_size, r.font_size,
-                        )).ok();
+                            &r.url,
+                            r.dns_time_ms,
+                            r.tcp_time_ms,
+                            r.tls_time_ms,
+                            r.http_status,
+                            r.ttfb_ms,
+                            r.dom_content_loaded_ms,
+                            r.load_event_ms,
+                            r.total_requests,
+                            r.html_size,
+                            r.css_size,
+                            r.js_size,
+                            r.image_size,
+                            r.font_size,
+                        ))
+                        .ok();
                     }
                 }
                 // 视频结果
                 if !video_data.is_empty() {
                     wtr.write_record(&[""]).ok();
                     wtr.write_record(&["=== 视频测试结果 ==="]).ok();
-                    wtr.write_record(&["URL","平台","DNS时延","播放成功","首次播放时延","缓冲次数","丢帧","解码帧"]).ok();
+                    wtr.write_record(&[
+                        "URL",
+                        "平台",
+                        "DNS时延",
+                        "播放成功",
+                        "首次播放时延",
+                        "缓冲次数",
+                        "丢帧",
+                        "解码帧",
+                    ])
+                    .ok();
                     for r in &video_data {
-                        wtr.serialize((&r.url, r.dns_time_ms, r.play_success, r.first_play_time_ms, r.buffer_count, r.dropped_frames, r.decoded_frames)).ok();
+                        wtr.serialize((
+                            &r.url,
+                            r.dns_time_ms,
+                            r.play_success,
+                            r.first_play_time_ms,
+                            r.buffer_count,
+                            r.dropped_frames,
+                            r.decoded_frames,
+                        ))
+                        .ok();
                     }
                 }
                 // 下载结果
                 if !download_data.is_empty() {
                     wtr.write_record(&[""]).ok();
                     wtr.write_record(&["=== 下载测试结果 ==="]).ok();
-                    wtr.write_record(&["URL","DNS时延","TCP时延","下载速度(KB/s)","耗时(ms)","大小(B)","成功"]).ok();
+                    wtr.write_record(&[
+                        "URL",
+                        "DNS时延",
+                        "TCP时延",
+                        "下载速度(KB/s)",
+                        "耗时(ms)",
+                        "大小(B)",
+                        "成功",
+                    ])
+                    .ok();
                     for r in &download_data {
-                        wtr.serialize((&r.url, r.dns_time_ms, r.tcp_time_ms, r.download_speed, r.download_time_ms, r.file_size, r.success)).ok();
+                        wtr.serialize((
+                            &r.url,
+                            r.dns_time_ms,
+                            r.tcp_time_ms,
+                            r.download_speed,
+                            r.download_time_ms,
+                            r.file_size,
+                            r.success,
+                        ))
+                        .ok();
                     }
                 }
                 // Ping结果
                 if !ping_data.is_empty() {
                     wtr.write_record(&[""]).ok();
                     wtr.write_record(&["=== Ping测试结果 ==="]).ok();
-                    wtr.write_record(&["目标","方式","时延(ms)","丢包率(%)","抖动(ms)","成功"]).ok();
+                    wtr.write_record(&[
+                        "目标",
+                        "方式",
+                        "时延(ms)",
+                        "丢包率(%)",
+                        "抖动(ms)",
+                        "成功",
+                    ])
+                    .ok();
                     for r in &ping_data {
-                        wtr.serialize((&r.host, &r.method, r.avg_latency_ms, r.packet_loss_rate, r.jitter_ms, r.success)).ok();
+                        wtr.serialize((
+                            &r.host,
+                            &r.method,
+                            r.avg_latency_ms,
+                            r.packet_loss_rate,
+                            r.jitter_ms,
+                            r.success,
+                        ))
+                        .ok();
                     }
                 }
-                wtr.flush().map_err(|e| AppError::internal(&e.to_string()))?;
+                wtr.flush()
+                    .map_err(|e| AppError::internal(&e.to_string()))?;
             }
             buf
         }
@@ -418,7 +511,10 @@ async fn export_plan_run(
 
     Ok(axum::response::Response::builder()
         .header(axum::http::header::CONTENT_TYPE, mime)
-        .header(axum::http::header::CONTENT_DISPOSITION, format!("attachment; filename={}", filename))
+        .header(
+            axum::http::header::CONTENT_DISPOSITION,
+            format!("attachment; filename={}", filename),
+        )
         .body(axum::body::Body::from(body))
         .unwrap())
 }

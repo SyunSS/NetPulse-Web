@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDialog, useMessage } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
@@ -19,7 +19,7 @@ interface User {
 
 const users = ref<User[]>([])
 const loading = ref(false)
-const isAdmin = authStore.isAdmin
+const isAdmin = computed(() => authStore.isAdmin)
 
 async function fetchUsers() {
   loading.value = true
@@ -63,7 +63,7 @@ async function deleteUser(userId: string, username: string) {
 }
 
 onMounted(() => {
-  if (isAdmin) fetchUsers()
+  if (isAdmin.value) fetchUsers()
 })
 </script>
 

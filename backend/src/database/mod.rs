@@ -13,6 +13,12 @@ pub async fn init_db(path: &str) -> anyhow::Result<SqlitePool> {
 
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("PRAGMA foreign_keys=ON;").execute(conn).await?;
+                Ok(())
+            })
+        })
         .connect(&format!("sqlite:{}?mode=rwc", path))
         .await?;
 
@@ -20,10 +26,6 @@ pub async fn init_db(path: &str) -> anyhow::Result<SqlitePool> {
     sqlx::query("PRAGMA journal_mode=WAL;")
         .execute(&pool)
         .await?;
-    sqlx::query("PRAGMA foreign_keys=ON;")
-        .execute(&pool)
-        .await?;
-
     info!("数据库连接已建立: {}", path);
 
     // 执行建表迁移
@@ -296,49 +298,67 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "ping_result", "method", "TEXT").await?;
 
     // 兜底：确保计划相关表一定存在（老数据库可能缺少）
-    create_table_if_missing(pool, "task_plans",
+    create_table_if_missing(
+        pool,
+        "task_plans",
         "CREATE TABLE IF NOT EXISTS task_plans (\
             id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT,\
             cron_expression TEXT, enabled INTEGER DEFAULT 1, last_run_at TEXT, next_run_at TEXT,\
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL,\
-            FOREIGN KEY (user_id) REFERENCES users(id))"
-    ).await?;
-    create_table_if_missing(pool, "task_plan_items",
+            FOREIGN KEY (user_id) REFERENCES users(id))",
+    )
+    .await?;
+    create_table_if_missing(
+        pool,
+        "task_plan_items",
         "CREATE TABLE IF NOT EXISTS task_plan_items (\
             id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, task_type TEXT NOT NULL,\
             urls TEXT NOT NULL, options TEXT, repeat_count INTEGER DEFAULT 1,\
             engine TEXT DEFAULT 'headless_chrome', order_index INTEGER DEFAULT 0,\
             created_at TEXT NOT NULL,\
-            FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE)"
-    ).await?;
-    create_table_if_missing(pool, "task_plan_runs",
+            FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE)",
+    )
+    .await?;
+    create_table_if_missing(
+        pool,
+        "task_plan_runs",
         "CREATE TABLE IF NOT EXISTS task_plan_runs (\
             id TEXT PRIMARY KEY, plan_id TEXT NOT NULL,\
             task_ids TEXT NOT NULL DEFAULT '[]', triggered_by TEXT NOT NULL,\
             started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL,\
             created_at TEXT NOT NULL,\
-            FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE)"
-    ).await?;
+            FOREIGN KEY (plan_id) REFERENCES task_plans(id) ON DELETE CASCADE)",
+    )
+    .await?;
 
     // 兜底：确保 metric 表也存在
-    create_table_if_missing(pool, "metric_definition",
+    create_table_if_missing(
+        pool,
+        "metric_definition",
         "CREATE TABLE IF NOT EXISTS metric_definition (\
             id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,\
             category TEXT NOT NULL, collector TEXT NOT NULL, description TEXT,\
-            cost_level TEXT DEFAULT 'low', default_enable INTEGER DEFAULT 1)"
-    ).await?;
-    create_table_if_missing(pool, "metric_profile",
+            cost_level TEXT DEFAULT 'low', default_enable INTEGER DEFAULT 1)",
+    )
+    .await?;
+    create_table_if_missing(
+        pool,
+        "metric_profile",
         "CREATE TABLE IF NOT EXISTS metric_profile (\
             id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT,\
             metric_ids TEXT NOT NULL DEFAULT '[]', user_id TEXT NOT NULL,\
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL,\
-            FOREIGN KEY (user_id) REFERENCES users(id))"
-    ).await?;
-    create_table_if_missing(pool, "task_metric_config",
+            FOREIGN KEY (user_id) REFERENCES users(id))",
+    )
+    .await?;
+    create_table_if_missing(
+        pool,
+        "task_metric_config",
         "CREATE TABLE IF NOT EXISTS task_metric_config (\
             id TEXT PRIMARY KEY, task_id TEXT NOT NULL, metric_ids TEXT NOT NULL DEFAULT '[]',\
-            profile_id TEXT, FOREIGN KEY (task_id) REFERENCES test_task(id))"
-    ).await?;
+            profile_id TEXT, FOREIGN KEY (task_id) REFERENCES test_task(id))",
+    )
+    .await?;
 
     // 种子数据：默认指标定义
     seed_metric_definitions(pool).await?;
@@ -348,13 +368,16 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 /// 安全地创建表（如果表不存在）
-async fn create_table_if_missing(pool: &SqlitePool, table: &str, create_sql: &str) -> anyhow::Result<()> {
-    let exists: i32 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
-    )
-    .bind(table)
-    .fetch_one(pool)
-    .await?;
+async fn create_table_if_missing(
+    pool: &SqlitePool,
+    table: &str,
+    create_sql: &str,
+) -> anyhow::Result<()> {
+    let exists: i32 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?")
+            .bind(table)
+            .fetch_one(pool)
+            .await?;
     if exists == 0 {
         sqlx::query(create_sql).execute(pool).await?;
         info!("增量迁移: 创建表 {}", table);
@@ -369,13 +392,12 @@ async fn add_column_if_missing(
     column: &str,
     col_def: &str,
 ) -> anyhow::Result<()> {
-    let exists: i32 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
-    )
-    .bind(table)
-    .bind(column)
-    .fetch_one(pool)
-    .await?;
+    let exists: i32 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?")
+            .bind(table)
+            .bind(column)
+            .fetch_one(pool)
+            .await?;
     if exists == 0 {
         let sql = format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, col_def);
         sqlx::query(&sql).execute(pool).await?;
@@ -387,26 +409,125 @@ async fn add_column_if_missing(
 /// 种子数据：插入默认指标定义（幂等）
 async fn seed_metric_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     let count: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM metric_definition")
-        .fetch_one(pool).await?;
-    if count > 0 { return Ok(()); }
+        .fetch_one(pool)
+        .await?;
+    if count > 0 {
+        return Ok(());
+    }
 
     let defs = [
-        ("dns_time","DNS解析时延","network","DnsEngine","DNS 解析耗时"),
-        ("tcp_time","TCP连接时延","network","HttpEngine","TCP 握手耗时"),
-        ("tls_time","TLS握手时延","network","HttpEngine","TLS 握手耗时"),
-        ("ttfb","首包时延","network","HttpEngine","首字节响应时间"),
-        ("http_status","HTTP状态码","network","HttpEngine","HTTP 状态码"),
-        ("fcp","首屏时延(FCP)","page","PageCollector","First Contentful Paint"),
-        ("dom_load","DOM加载时延","page","PageCollector","DOMContentLoaded"),
-        ("load_time","首页时延","page","PageCollector","Load Event 时间"),
-        ("lcp","最大内容绘制","performance","TraceCollector","Largest Contentful Paint"),
-        ("cls","累计布局偏移","performance","TraceCollector","Cumulative Layout Shift"),
-        ("total_size","页面总大小","resource","NetworkCollector","所有资源总大小"),
-        ("html_size","HTML大小","resource","NetworkCollector","HTML 文档大小"),
-        ("css_size","CSS大小","resource","NetworkCollector","样式表总大小"),
-        ("js_size","JS大小","resource","NetworkCollector","脚本总大小"),
-        ("img_size","图片大小","resource","NetworkCollector","图片总大小"),
-        ("requests","请求数量","resource","NetworkCollector","总 HTTP 请求数"),
+        (
+            "dns_time",
+            "DNS解析时延",
+            "network",
+            "DnsEngine",
+            "DNS 解析耗时",
+        ),
+        (
+            "tcp_time",
+            "TCP连接时延",
+            "network",
+            "HttpEngine",
+            "TCP 握手耗时",
+        ),
+        (
+            "tls_time",
+            "TLS握手时延",
+            "network",
+            "HttpEngine",
+            "TLS 握手耗时",
+        ),
+        (
+            "ttfb",
+            "首包时延",
+            "network",
+            "HttpEngine",
+            "首字节响应时间",
+        ),
+        (
+            "http_status",
+            "HTTP状态码",
+            "network",
+            "HttpEngine",
+            "HTTP 状态码",
+        ),
+        (
+            "fcp",
+            "首屏时延(FCP)",
+            "page",
+            "PageCollector",
+            "First Contentful Paint",
+        ),
+        (
+            "dom_load",
+            "DOM加载时延",
+            "page",
+            "PageCollector",
+            "DOMContentLoaded",
+        ),
+        (
+            "load_time",
+            "首页时延",
+            "page",
+            "PageCollector",
+            "Load Event 时间",
+        ),
+        (
+            "lcp",
+            "最大内容绘制",
+            "performance",
+            "TraceCollector",
+            "Largest Contentful Paint",
+        ),
+        (
+            "cls",
+            "累计布局偏移",
+            "performance",
+            "TraceCollector",
+            "Cumulative Layout Shift",
+        ),
+        (
+            "total_size",
+            "页面总大小",
+            "resource",
+            "NetworkCollector",
+            "所有资源总大小",
+        ),
+        (
+            "html_size",
+            "HTML大小",
+            "resource",
+            "NetworkCollector",
+            "HTML 文档大小",
+        ),
+        (
+            "css_size",
+            "CSS大小",
+            "resource",
+            "NetworkCollector",
+            "样式表总大小",
+        ),
+        (
+            "js_size",
+            "JS大小",
+            "resource",
+            "NetworkCollector",
+            "脚本总大小",
+        ),
+        (
+            "img_size",
+            "图片大小",
+            "resource",
+            "NetworkCollector",
+            "图片总大小",
+        ),
+        (
+            "requests",
+            "请求数量",
+            "resource",
+            "NetworkCollector",
+            "总 HTTP 请求数",
+        ),
     ];
 
     for (name, display, cat, collector, desc) in &defs {
