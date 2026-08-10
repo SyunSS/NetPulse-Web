@@ -1,6 +1,8 @@
 # Rust
 backend/target/
 backend/data/
+backend/storage/
+storage/
 
 # Node
 frontend/node_modules/

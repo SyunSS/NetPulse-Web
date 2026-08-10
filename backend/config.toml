@@ -32,6 +32,7 @@ timeout_seconds = 120
 [storage]
 screenshot_dir = "./data/screenshots"
 excel_dir = "./data/excel"
+secure_dir = "./storage"
 
 [jwt]
 secret = "netpulse-jwt-secret-change-in-production"
@@ -45,6 +46,26 @@ url_keywords = ["youtube.com", "youtu.be"]
 [[video_platforms]]
 name = "bilibili"
 url_keywords = ["bilibili.com", "b23.tv"]
+
+[[video_platforms]]
+name = "sohu"
+url_keywords = ["sohu.com"]
+
+[[video_platforms]]
+name = "youku"
+url_keywords = ["youku.com", "tudou.com"]
+
+[[video_platforms]]
+name = "mgtv"
+url_keywords = ["mgtv.com", "hunantv.com"]
+
+[[video_platforms]]
+name = "pptv"
+url_keywords = ["pptv.com", "pps.tv"]
+
+[[video_platforms]]
+name = "qq"
+url_keywords = ["v.qq.com", "video.qq.com"]
 
 [[video_platforms]]
 name = "netflix"

@@ -25,6 +25,14 @@ impl PlayerAdapter for BilibiliAdapter {
         vec!["video.bpx-player-video".to_string(), "video".to_string()]
     }
 
+    fn play_button_selectors(&self) -> Vec<String> {
+        vec![
+            ".bpx-player-ctrl-play".to_string(),
+            ".bilibili-player-video-btn-start".to_string(),
+            ".bpx-player-video-area".to_string(),
+        ]
+    }
+
     fn play_trigger_js(&self) -> Option<String> {
         Some(
             r#"

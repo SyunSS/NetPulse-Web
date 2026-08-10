@@ -48,11 +48,39 @@ pub fn match_platform(platforms: &[VideoPlatformConfig], url: &str) -> VideoPlat
         .iter()
         .find(|p| p.matches_url(url))
         .cloned()
+        .or_else(|| builtin_platform(url))
         .unwrap_or_else(|| VideoPlatformConfig {
             name: "html5".to_string(),
             url_keywords: vec![],
             detect_only: None,
         })
+}
+
+fn builtin_platform(url: &str) -> Option<VideoPlatformConfig> {
+    let lower = url.to_lowercase();
+    let (name, keywords) = if lower.contains("youtube.com") || lower.contains("youtu.be") {
+        ("youtube", vec!["youtube.com", "youtu.be"])
+    } else if lower.contains("bilibili.com") || lower.contains("b23.tv") {
+        ("bilibili", vec!["bilibili.com", "b23.tv"])
+    } else if lower.contains("sohu.com") {
+        ("sohu", vec!["sohu.com"])
+    } else if lower.contains("youku.com") || lower.contains("tudou.com") {
+        ("youku", vec!["youku.com", "tudou.com"])
+    } else if lower.contains("mgtv.com") || lower.contains("hunantv.com") {
+        ("mgtv", vec!["mgtv.com", "hunantv.com"])
+    } else if lower.contains("pptv.com") || lower.contains("pps.tv") {
+        ("pptv", vec!["pptv.com", "pps.tv"])
+    } else if lower.contains("v.qq.com") || lower.contains("video.qq.com") {
+        ("qq", vec!["v.qq.com", "video.qq.com"])
+    } else {
+        return None;
+    };
+
+    Some(VideoPlatformConfig {
+        name: name.to_string(),
+        url_keywords: keywords.into_iter().map(str::to_string).collect(),
+        detect_only: None,
+    })
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -111,6 +139,12 @@ pub struct TaskConfig {
 pub struct StorageConfig {
     pub screenshot_dir: String,
     pub excel_dir: String,
+    #[serde(default = "default_secure_dir")]
+    pub secure_dir: String,
+}
+
+fn default_secure_dir() -> String {
+    "./storage".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize)]

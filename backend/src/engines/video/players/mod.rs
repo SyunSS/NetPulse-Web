@@ -19,5 +19,8 @@ pub trait PlayerAdapter: Send + Sync {
     fn name(&self) -> &'static str;
     async fn detect(&self, page: &Page, url: &str) -> bool;
     fn video_selectors(&self) -> Vec<String>;
+    fn play_button_selectors(&self) -> Vec<String> {
+        vec![]
+    }
     fn play_trigger_js(&self) -> Option<String>;
 }

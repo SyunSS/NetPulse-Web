@@ -30,13 +30,33 @@ impl PlayerAdapter for GenericHtml5Adapter {
         vec!["video".to_string()]
     }
 
+    fn play_button_selectors(&self) -> Vec<String> {
+        vec![
+            "video".to_string(),
+            ".xgplayer-start".to_string(),
+            ".xgplayer-play".to_string(),
+            ".txp_btn_play".to_string(),
+            ".txp_overlay_play".to_string(),
+            ".mango-player .btn-play".to_string(),
+            ".mgtv-player .btn-play".to_string(),
+            ".ykplayer .x-play-btn".to_string(),
+            ".youku-layer-logo".to_string(),
+            ".play-btn".to_string(),
+            ".btn-play".to_string(),
+            "[aria-label*=\"play\" i]".to_string(),
+            "[title*=\"play\" i]".to_string(),
+            "[aria-label*=\"播放\"]".to_string(),
+            "[title*=\"播放\"]".to_string(),
+        ]
+    }
+
     fn play_trigger_js(&self) -> Option<String> {
         Some(
             r#"
         (function(){
             var videos = document.querySelectorAll('video');
             for (var i=0; i<videos.length; i++) {
-                try { videos[i].play().catch(function(){}); } catch(e){}
+                try { videos[i].muted = true; videos[i].play().catch(function(){}); } catch(e){}
             }
         })()
         "#

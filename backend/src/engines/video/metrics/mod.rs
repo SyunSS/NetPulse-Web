@@ -59,12 +59,14 @@ pub struct MetricCollector {
     buffer_start_time: std::time::Instant,
     play_started: bool,
     first_play_elapsed: Option<f64>,
+    play_request_time: Option<std::time::Instant>,
     // 网络速度采样
     last_bytes_sample_time: std::time::Instant,
     current_sample_bytes: u64,
     peak_bps: f64,
     // 卡顿
     last_current_time: f64,
+    observed_media_sec: f64,
     stutter_active: bool,
     stutter_start_time: std::time::Instant,
 }
@@ -86,10 +88,12 @@ impl MetricCollector {
             buffer_start_time: std::time::Instant::now(),
             play_started: false,
             first_play_elapsed: None,
+            play_request_time: None,
             last_bytes_sample_time: std::time::Instant::now(),
             current_sample_bytes: 0,
             peak_bps: 0.0,
             last_current_time: 0.0,
+            observed_media_sec: 0.0,
             stutter_active: false,
             stutter_start_time: std::time::Instant::now(),
         }
@@ -102,13 +106,7 @@ impl MetricCollector {
                 video_src,
                 meta: _,
             } => {
-                if !self.play_started {
-                    self.play_started = true;
-                    self.first_play_elapsed =
-                        Some(self.engine_start.elapsed().as_secs_f64() * 1000.0);
-                    self.metrics.play_success = true;
-                    self.metrics.first_play_time_ms = self.first_play_elapsed;
-                }
+                self.mark_play_started();
                 if let Some(src) = video_src {
                     if self.metrics.video_host.is_none() {
                         if let Ok(parsed) = url::Url::parse(src) {
@@ -232,6 +230,23 @@ impl MetricCollector {
         self.metrics.trigger_method = method.to_string();
     }
 
+    pub fn mark_play_requested(&mut self) {
+        self.play_request_time = Some(std::time::Instant::now());
+    }
+
+    fn mark_play_started(&mut self) {
+        if !self.play_started {
+            self.play_started = true;
+            let elapsed_ms = self
+                .play_request_time
+                .map(|t| t.elapsed().as_secs_f64() * 1000.0)
+                .unwrap_or_else(|| self.engine_start.elapsed().as_secs_f64() * 1000.0);
+            self.first_play_elapsed = Some(elapsed_ms);
+            self.metrics.play_success = true;
+            self.metrics.first_play_time_ms = self.first_play_elapsed;
+        }
+    }
+
     pub fn set_page_title(&mut self, title: String) {
         self.metrics.page_title = Some(title);
     }
@@ -245,21 +260,11 @@ impl MetricCollector {
     }
 
     fn play_duration(&self) -> f64 {
-        if let Some(first) = self.first_play_elapsed {
-            let now_ms = self.engine_start.elapsed().as_secs_f64() * 1000.0;
-            ((now_ms - first) / 1000.0).max(0.0)
-        } else {
-            0.0
-        }
+        self.observed_media_sec.max(0.0)
     }
 
     pub fn has_played_for(&self, duration: Duration) -> bool {
-        self.first_play_elapsed
-            .map(|first_ms| {
-                let now_ms = self.engine_start.elapsed().as_secs_f64() * 1000.0;
-                now_ms - first_ms >= duration.as_secs_f64() * 1000.0
-            })
-            .unwrap_or(false)
+        self.observed_media_sec >= duration.as_secs_f64()
     }
 
     /// 更新播放、元数据、帧数和卡顿指标（从 JS 轮询数据）。
@@ -290,16 +295,16 @@ impl MetricCollector {
             self.metrics.dropped_frames = dropped_frames;
         }
 
-        let progressed = current_time > self.last_current_time + 0.05;
+        let delta = current_time - self.last_current_time;
+        let progressed = delta > 0.05;
         if !self.play_started && ready_state >= 2 && (!paused || progressed) && current_time > 0.0 {
-            self.play_started = true;
-            self.first_play_elapsed = Some(self.engine_start.elapsed().as_secs_f64() * 1000.0);
-            self.metrics.play_success = true;
-            self.metrics.first_play_time_ms = self.first_play_elapsed;
+            self.mark_play_started();
         }
 
         if self.play_started && self.last_current_time > 0.0 {
-            let delta = current_time - self.last_current_time;
+            if delta > 0.0 && delta < 5.0 {
+                self.observed_media_sec += delta;
+            }
             if !paused && delta < 0.05 {
                 if !self.stutter_active {
                     self.stutter_active = true;
@@ -328,7 +333,11 @@ impl MetricCollector {
         // 下载速度
         let elapsed = self.engine_start.elapsed().as_secs_f64();
         if self.metrics.total_bytes > 0 && elapsed > 0.0 {
-            self.metrics.download_speed = Some(self.metrics.total_bytes as f64 / elapsed / 1024.0);
+            let speed_elapsed = self.play_duration();
+            if speed_elapsed > 0.0 {
+                self.metrics.download_speed =
+                    Some(self.metrics.total_bytes as f64 / speed_elapsed / 1024.0);
+            }
         }
         if self.peak_bps > 0.0 {
             self.metrics.peak_speed = Some(self.peak_bps / 1024.0);

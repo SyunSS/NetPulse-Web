@@ -16,6 +16,7 @@ tokio = { version = "1", features = ["full"] }
 # 序列化
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = "0.22"
 
 # 数据库
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "uuid"] }
@@ -37,6 +38,7 @@ bcrypt = "0.16"
 
 # UUID
 uuid = { version = "1", features = ["v4", "serde"] }
+ring = "0.17"
 
 # 时间
 chrono = { version = "0.4", features = ["serde"] }

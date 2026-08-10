@@ -41,7 +41,7 @@ COPY --from=backend-builder /build/target/release/netpulse-web /app/
 COPY --from=backend-builder /build/config.toml /app/
 COPY --from=frontend-builder /build/dist /app/frontend-dist
 
-RUN mkdir -p /app/data /app/logs /app/data/screenshots /app/data/excel
+RUN mkdir -p /app/data /app/logs /app/storage /app/data/screenshots /app/data/excel
 
 EXPOSE 3000
 

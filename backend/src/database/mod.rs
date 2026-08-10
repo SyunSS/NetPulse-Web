@@ -165,6 +165,17 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             updated_at TEXT NOT NULL
         );
         "#,
+        // video_cookie_store 表
+        r#"
+        CREATE TABLE IF NOT EXISTS video_cookie_store (
+            platform TEXT PRIMARY KEY,
+            encrypted_payload TEXT NOT NULL,
+            cookie_count INTEGER NOT NULL DEFAULT 0,
+            domain_summary TEXT NOT NULL DEFAULT '[]',
+            updated_by TEXT,
+            updated_at TEXT NOT NULL
+        );
+        "#,
         // task_plans 表
         r#"
         CREATE TABLE IF NOT EXISTS task_plans (

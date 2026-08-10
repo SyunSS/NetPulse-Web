@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use tracing::{error, info};
+use chromiumoxide::cdp::browser_protocol::network::SetCacheDisabledParams;
 
 use crate::config::VideoPlatformConfig;
 use crate::engines::dns::DnsEngine;
@@ -183,7 +184,7 @@ impl VideoEngine {
             headless,
             user_data_dir,
             timeout,
-            play_duration: Duration::from_secs(15),
+            play_duration: Duration::from_secs(60),
         }
     }
 
@@ -191,8 +192,9 @@ impl VideoEngine {
         &self,
         url: &str,
         platform_cfg: &VideoPlatformConfig,
+        cookie_json: Option<serde_json::Value>,
     ) -> VideoTestResult {
-        match tokio::time::timeout(self.timeout, self.test_page_inner(url, platform_cfg)).await {
+        match tokio::time::timeout(self.timeout, self.test_page_inner(url, platform_cfg, cookie_json)).await {
             Ok(result) => result,
             Err(_) => {
                 let mut result = VideoTestResult {
@@ -209,6 +211,7 @@ impl VideoEngine {
         &self,
         url: &str,
         platform_cfg: &VideoPlatformConfig,
+        cookie_json: Option<serde_json::Value>,
     ) -> VideoTestResult {
         let diag = DiagnosticLogger::new();
         info!(
@@ -292,6 +295,7 @@ impl VideoEngine {
                 .into();
             }
         };
+        page.enable_stealth_mode().await.ok();
 
         // 5. 事件通道
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<VideoEvent>();
@@ -307,6 +311,7 @@ impl VideoEngine {
         page.execute(chromiumoxide::cdp::browser_protocol::network::EnableParams::default())
             .await
             .ok();
+        page.execute(SetCacheDisabledParams::new(true)).await.ok();
         page.execute(chromiumoxide::cdp::browser_protocol::media::EnableParams::default())
             .await
             .ok();
@@ -418,19 +423,32 @@ impl VideoEngine {
         diag.log_phase("注册导航前 JS Hooks...");
         hook_manager.inject_on_new_document().await.ok();
 
+        if let Some(cookies) = cookie_json.as_ref() {
+            match hook_manager.set_cookies_from_json(cookies).await {
+                Ok(count) if count > 0 => diag.log_phase(&format!("已注入平台 Cookie: {} 个", count)),
+                Ok(_) => diag.log_phase("未发现可注入 Cookie"),
+                Err(e) => diag.log_phase(&format!("Cookie 注入失败，继续匿名测试: {}", e)),
+            }
+        }
+
         // 7. 导航
         diag.log_phase(&format!("导航: {}", url));
         if let Err(e) = page.goto(url).await {
             let err_msg = format!("导航失败: {}", e);
-            diag.log_phase(&err_msg);
-            error!("{}", err_msg);
-            return VideoMetrics::error_result(
-                &platform_cfg.name,
-                dns_result,
-                http_result,
-                &err_msg,
-            )
-            .into();
+            diag.log_phase(&format!("{}，检查页面是否已可用", err_msg));
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let usable = hook_manager.page_is_usable().await.unwrap_or(false);
+            if !usable {
+                error!("{}", err_msg);
+                return VideoMetrics::error_result(
+                    &platform_cfg.name,
+                    dns_result,
+                    http_result,
+                    &err_msg,
+                )
+                .into();
+            }
+            diag.log_phase("导航失败但 DOM 可用，继续播放器测试");
         }
         let _ = event_tx.send(VideoEvent::PageLoaded {
             url: url.to_string(),
@@ -454,14 +472,23 @@ impl VideoEngine {
 
         // 10. 检测播放器
         diag.log_phase("识别播放器...");
+        let mut video_count = hook_manager.detect_video_elements().await.unwrap_or(0);
+        for _ in 0..8 {
+            if video_count > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            video_count = hook_manager.detect_video_elements().await.unwrap_or(0);
+        }
         let registry = PlayerRegistry::new();
         let player = registry.detect(&page, url).await;
-        let player_name = player
-            .map(|p| p.name().to_string())
-            .unwrap_or_else(|| "html5".to_string());
+        let (player_name, play_js, play_selectors) = if let Some(p) = player {
+            (p.name().to_string(), p.play_trigger_js(), p.play_button_selectors())
+        } else {
+            ("html5".to_string(), None, vec!["video".to_string(), ".play-btn".to_string(), ".btn-play".to_string()])
+        };
         diag.log_phase(&format!("播放器: {}", player_name));
 
-        let video_count = hook_manager.detect_video_elements().await.unwrap_or(0);
         let _ = event_tx.send(VideoEvent::VideoElementDiscovered {
             selector: "video".into(),
             count: video_count,
@@ -475,16 +502,24 @@ impl VideoEngine {
 
         // 11. 触发播放
         diag.log_phase("触发播放...");
-        let play_js = player.and_then(|p| p.play_trigger_js());
+        collector.mark_play_requested();
+        let clicked = hook_manager
+            .click_play_candidate(&play_selectors)
+            .await
+            .unwrap_or(false);
+        if clicked {
+            diag.log_phase("Level 1: 真实鼠标点击播放候选元素");
+        }
         hook_manager.trigger_play(play_js.as_deref()).await.ok();
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         // 12. 主事件循环
         diag.log_phase("进入主事件循环...");
         let play_dur = self.play_duration;
-        let max_wait = Duration::from_secs(play_dur.as_secs() + 20);
+        let max_wait = Duration::from_secs(play_dur.as_secs() + 30);
         let start = std::time::Instant::now();
-        let mut click_triggered = false;
+        let mut second_click_triggered = clicked;
+        let mut third_triggered = false;
         let mut poll_interval = tokio::time::interval(Duration::from_secs(1));
         let mut last_video_state = serde_json::json!({});
 
@@ -522,14 +557,17 @@ impl VideoEngine {
                     let elapsed = start.elapsed();
 
                     // 多级播放触发
-                    if !click_triggered && elapsed >= Duration::from_secs(12) {
-                        diag.log_phase("Level 2: 点击页面中心触发播放");
-                        hook_manager.click_center().await.ok();
-                        click_triggered = true;
+                    if !collector.metrics.play_success && !second_click_triggered && elapsed >= Duration::from_secs(5) {
+                        diag.log_phase("Level 2: 再次真实点击播放候选元素");
+                        if !hook_manager.click_play_candidate(&play_selectors).await.unwrap_or(false) {
+                            hook_manager.click_center().await.ok();
+                        }
+                        second_click_triggered = true;
                     }
-                    if elapsed >= Duration::from_secs(40) {
-                        diag.log_phase("Level 3: 再次尝试触发");
+                    if !collector.metrics.play_success && !third_triggered && elapsed >= Duration::from_secs(15) {
+                        diag.log_phase("Level 3: 再次尝试 JS 触发");
                         hook_manager.trigger_play(None).await.ok();
+                        third_triggered = true;
                     }
 
                     if elapsed >= max_wait {
@@ -550,7 +588,10 @@ impl VideoEngine {
         collector.set_page_title(page_title.unwrap_or_default());
 
         if !collector.metrics.play_success && collector.metrics.error.is_none() {
-            let page_text = hook_manager.page_text().await.unwrap_or_default();
+            let page_text = hook_manager
+                .playback_diagnostic_text()
+                .await
+                .unwrap_or_default();
             let error = classify_playback_failure(
                 video_count,
                 &last_video_state,
@@ -586,10 +627,6 @@ fn classify_playback_failure(
     total_bytes: u64,
     page_text: &str,
 ) -> String {
-    if video_count == 0 {
-        return "no_video_element: 页面未发现 HTML5 video 元素".into();
-    }
-
     let paused = state.get("paused").and_then(|v| v.as_bool()).unwrap_or(true);
     let ready_state = state.get("readyState").and_then(|v| v.as_u64()).unwrap_or(0);
     let network_state = state.get("networkState").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -602,7 +639,16 @@ fn classify_playback_failure(
     {
         return "captcha_or_bot_check: 页面要求完成验证码或人机验证".into();
     }
-    if ["log in", "login", "sign in", "登录", "请先登录"]
+    if [
+        "login required",
+        "sign in to confirm",
+        "sign in to watch",
+        "log in to watch",
+        "请先登录后观看",
+        "登录后观看",
+        "请先登录",
+        "会员登录",
+    ]
         .iter()
         .any(|keyword| lower_text.contains(keyword))
     {
@@ -613,6 +659,10 @@ fn classify_playback_failure(
         .any(|keyword| lower_text.contains(keyword))
     {
         return "geo_or_rights_blocked: 视频受地区、版权或访问范围限制".into();
+    }
+
+    if video_count == 0 {
+        return "no_video_element: 页面未发现 HTML5 video 元素".into();
     }
 
     if total_bytes == 0 && ready_state < 2 {
@@ -626,6 +676,6 @@ fn classify_playback_failure(
     }
 
     format!(
-        "playback_not_advanced: video 元素存在但播放时间未持续推进 (currentTime={current_time:.2}, readyState={ready_state}, bytes={total_bytes})"
+        "unknown_playback_failure: video 元素存在但播放时间未持续推进 (currentTime={current_time:.2}, readyState={ready_state}, bytes={total_bytes})"
     )
 }

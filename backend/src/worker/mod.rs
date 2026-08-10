@@ -17,6 +17,7 @@ use crate::engines::download::DownloadEngine;
 use crate::engines::http::HttpEngine;
 use crate::engines::ping::PingEngine;
 use crate::engines::video::VideoEngine;
+use crate::services::video_cookie_service::VideoCookieService;
 use crate::models::task::{DownloadResult, PingResult, VideoResult, WebsiteResult};
 use crate::storage::StorageManager;
 use crate::utils::response::{ProgressMessage, TaskJob};
@@ -873,14 +874,67 @@ async fn test_single_video(
     let result_id = Uuid::new_v4().to_string();
 
     let platform_cfg = match_platform(&config.video_platforms, url);
-    let timeout = Duration::from_secs(config.task.timeout_seconds);
+    let timeout = Duration::from_secs(config.task.timeout_seconds.max(180));
+    let url_started = std::time::Instant::now();
     let video_engine = VideoEngine::new(
         &config.video_browser.path,
         config.video_browser.headless,
         config.video_browser.user_data_dir.clone(),
         timeout,
     );
-    let video_result = video_engine.test_page(url, &platform_cfg).await;
+    let cookie_platform = VideoCookieService::platform_for_url(url)
+        .or_else(|| VideoCookieService::normalize_platform(&platform_cfg.name));
+    let cookie_json = match cookie_platform {
+        Some(platform) => VideoCookieService::load_cookie_json(
+            db,
+            &config.storage.secure_dir,
+            platform,
+        )
+        .await?,
+        None => None,
+    };
+    let mut video_result = video_engine
+        .test_page(url, &platform_cfg, cookie_json.clone())
+        .await;
+
+    if !video_result.play_success
+        && video_result
+            .error
+            .as_deref()
+            .map(is_transient_video_failure)
+            .unwrap_or(false)
+    {
+        warn!("视频瞬时失败，使用全新浏览器会话重试: {}", url);
+        let elapsed = url_started.elapsed();
+        if elapsed + Duration::from_secs(30) < timeout {
+            let retry_engine = VideoEngine::new(
+                &config.video_browser.path,
+                config.video_browser.headless,
+                config.video_browser.user_data_dir.clone(),
+                timeout - elapsed,
+            );
+            let retry_result = retry_engine
+                .test_page(url, &platform_cfg, cookie_json)
+                .await;
+            if retry_result.play_success {
+                video_result = retry_result;
+            } else if let (Some(first), Some(second)) = (&video_result.error, &retry_result.error) {
+                video_result = retry_result;
+                video_result.error = Some(format!("重试一次仍失败: 首次={}, 重试={}", first, second));
+            } else {
+                video_result = retry_result;
+            }
+        } else {
+            let original_error = video_result
+                .error
+                .take()
+                .unwrap_or_else(|| "视频瞬时失败".to_string());
+            video_result.error = Some(format!(
+                "{}; 已接近单 URL 超时预算，跳过重试",
+                original_error
+            ));
+        }
+    }
 
     // 保存截图
     let screenshot_path = if let Some(data) = &video_result.screenshot {
@@ -932,6 +986,19 @@ async fn test_single_video(
     save_video_result(db, &result).await?;
 
     Ok(result)
+}
+
+fn is_transient_video_failure(error: &str) -> bool {
+    [
+        "导航失败",
+        "视频测试超时",
+        "no_video_element:",
+        "no_media_network:",
+        "autoplay_blocked:",
+        "unknown_playback_failure:",
+    ]
+    .iter()
+    .any(|marker| error.contains(marker))
 }
 
 /// 保存视频测试结果到数据库

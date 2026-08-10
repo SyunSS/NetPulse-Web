@@ -25,6 +25,14 @@ impl PlayerAdapter for YoutubeAdapter {
         vec!["video.html5-main-video".to_string(), "video".to_string()]
     }
 
+    fn play_button_selectors(&self) -> Vec<String> {
+        vec![
+            ".ytp-large-play-button".to_string(),
+            ".ytp-play-button".to_string(),
+            "video.html5-main-video".to_string(),
+        ]
+    }
+
     fn play_trigger_js(&self) -> Option<String> {
         Some(
             r#"

@@ -56,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
 
     crate::storage::StorageManager::ensure_dir(&config.storage.screenshot_dir)?;
     crate::storage::StorageManager::ensure_dir(&config.storage.excel_dir)?;
+    crate::storage::StorageManager::ensure_dir(&config.storage.secure_dir)?;
 
     let db_pool = init_db(config.database_path()).await?;
     info!("数据库初始化完成");
