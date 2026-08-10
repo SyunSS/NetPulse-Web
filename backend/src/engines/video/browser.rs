@@ -31,6 +31,10 @@ impl ChromiumoxideBrowser {
             builder = builder.with_head();
         }
 
+        if let Some(user_data_dir) = &config.user_data_dir {
+            builder = builder.arg(format!("--user-data-dir={user_data_dir}"));
+        }
+
         let launch_config = builder
             .build()
             .map_err(|e| anyhow::anyhow!("构建 BrowserConfig 失败: {}", e))?;

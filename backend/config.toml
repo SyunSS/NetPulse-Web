@@ -22,6 +22,8 @@ headless = true
 [video_browser]
 path = "/usr/bin/chromium"
 headless = true
+# 可选：配置后复用浏览器登录态；留空则每次匿名运行。
+# user_data_dir = "./data/video-browser-profile"
 
 [task]
 concurrency = 5

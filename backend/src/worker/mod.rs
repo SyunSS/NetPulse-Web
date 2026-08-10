@@ -724,7 +724,20 @@ async fn run_video_task(
                 if is_cancelled(&db, task_id, &cancel).await? {
                     return Ok(());
                 }
-                success_count += 1;
+                if result.play_success == Some(1) {
+                    success_count += 1;
+                } else {
+                    fail_count += 1;
+                    if let Some(error_msg) = &result.error_msg {
+                        log_progress(
+                            &db,
+                            &progress_tx,
+                            task_id,
+                            "warn",
+                            &format!("视频未完成播放 {}: {}", url, error_msg),
+                        );
+                    }
+                }
                 let _ = progress_tx.send(ProgressMessage::UrlCompleted {
                     task_id: task_id.clone(),
                     url: url.clone(),
@@ -864,6 +877,7 @@ async fn test_single_video(
     let video_engine = VideoEngine::new(
         &config.video_browser.path,
         config.video_browser.headless,
+        config.video_browser.user_data_dir.clone(),
         timeout,
     );
     let video_result = video_engine.test_page(url, &platform_cfg).await;

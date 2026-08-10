@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::engines::dns::DnsResult;
 use crate::engines::http::HttpResult;
 
@@ -147,14 +149,22 @@ impl MetricCollector {
                 audio_kbps,
                 ..
             } => {
-                self.metrics.video_bitrate_kbps = Some(*video_kbps);
-                self.metrics.audio_bitrate_kbps = Some(*audio_kbps);
+                if *video_kbps > 0.0 {
+                    self.metrics.video_bitrate_kbps = Some(*video_kbps);
+                }
+                if *audio_kbps > 0.0 {
+                    self.metrics.audio_bitrate_kbps = Some(*audio_kbps);
+                }
             }
             VideoEvent::DroppedFramesChanged {
                 dropped, decoded, ..
             } => {
-                self.metrics.dropped_frames = *dropped;
-                self.metrics.decoded_frames = *decoded;
+                if *dropped > 0 {
+                    self.metrics.dropped_frames = *dropped;
+                }
+                if *decoded > 0 {
+                    self.metrics.decoded_frames = *decoded;
+                }
             }
             VideoEvent::FpsChanged { fps, .. } => {
                 self.metrics.fps = Some(*fps);
@@ -165,12 +175,16 @@ impl MetricCollector {
                 mime_type,
                 ..
             } => {
-                self.metrics.video_codec = Some(video_codec.clone());
-                self.metrics.audio_codec = Some(audio_codec.clone());
+                if !video_codec.is_empty() {
+                    self.metrics.video_codec = Some(video_codec.clone());
+                }
+                if !audio_codec.is_empty() {
+                    self.metrics.audio_codec = Some(audio_codec.clone());
+                }
                 self.metrics.mime_type = Some(mime_type.clone());
             }
             VideoEvent::SegmentLoaded {
-                url,
+                url: _,
                 host,
                 size_bytes,
                 ..
@@ -180,15 +194,15 @@ impl MetricCollector {
                 if self.metrics.video_host.is_none() {
                     self.metrics.video_host = Some(host.clone());
                 }
-                // 速度采样: 每秒计算一次
-                self.current_sample_bytes += size_bytes;
+            }
+            VideoEvent::BytesReceived { bytes, .. } => {
+                self.metrics.total_bytes += bytes;
+                self.current_sample_bytes += bytes;
                 let now = std::time::Instant::now();
                 let sample_elapsed = now.duration_since(self.last_bytes_sample_time);
                 if sample_elapsed.as_secs_f64() >= 1.0 {
                     let bps = self.current_sample_bytes as f64 / sample_elapsed.as_secs_f64();
-                    if bps > self.peak_bps {
-                        self.peak_bps = bps;
-                    }
+                    self.peak_bps = self.peak_bps.max(bps);
                     self.current_sample_bytes = 0;
                     self.last_bytes_sample_time = now;
                 }
@@ -239,8 +253,27 @@ impl MetricCollector {
         }
     }
 
-    /// 更新卡顿相关指标（从 JS 轮询数据）
-    pub fn update_stutter(&mut self, current_time: f64, width: u32, height: u32, duration: f64) {
+    pub fn has_played_for(&self, duration: Duration) -> bool {
+        self.first_play_elapsed
+            .map(|first_ms| {
+                let now_ms = self.engine_start.elapsed().as_secs_f64() * 1000.0;
+                now_ms - first_ms >= duration.as_secs_f64() * 1000.0
+            })
+            .unwrap_or(false)
+    }
+
+    /// 更新播放、元数据、帧数和卡顿指标（从 JS 轮询数据）。
+    pub fn update_video_state(
+        &mut self,
+        current_time: f64,
+        paused: bool,
+        ready_state: u32,
+        width: u32,
+        height: u32,
+        duration: f64,
+        decoded_frames: u64,
+        dropped_frames: u64,
+    ) {
         if self.metrics.video_width == 0 {
             self.metrics.video_width = width;
         }
@@ -250,10 +283,24 @@ impl MetricCollector {
         if self.metrics.video_duration_sec == 0.0 {
             self.metrics.video_duration_sec = duration;
         }
+        if decoded_frames > 0 {
+            self.metrics.decoded_frames = decoded_frames;
+        }
+        if dropped_frames > 0 {
+            self.metrics.dropped_frames = dropped_frames;
+        }
+
+        let progressed = current_time > self.last_current_time + 0.05;
+        if !self.play_started && ready_state >= 2 && (!paused || progressed) && current_time > 0.0 {
+            self.play_started = true;
+            self.first_play_elapsed = Some(self.engine_start.elapsed().as_secs_f64() * 1000.0);
+            self.metrics.play_success = true;
+            self.metrics.first_play_time_ms = self.first_play_elapsed;
+        }
 
         if self.play_started && self.last_current_time > 0.0 {
-            let delta = (current_time - self.last_current_time).abs();
-            if delta < 0.1 {
+            let delta = current_time - self.last_current_time;
+            if !paused && delta < 0.05 {
                 if !self.stutter_active {
                     self.stutter_active = true;
                     self.stutter_start_time = std::time::Instant::now();

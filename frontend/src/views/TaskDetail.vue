@@ -239,7 +239,7 @@ const stClass = (s: string) => `st st-${s}`
       <div class="table-wrap">
         <table class="dt">
           <thead><tr>
-            <th>URL</th><th>平台</th><th>方式</th><th>DNS(ms)</th><th>TCP(ms)</th><th>首帧(S)</th><th>卡顿次数</th><th>卡顿占比(%)</th><th>播放时长(S)</th><th>分辨率</th><th>丢帧</th><th>状态</th>
+            <th>URL</th><th>平台</th><th>方式</th><th>DNS(ms)</th><th>TCP(ms)</th><th>首帧(S)</th><th>速度(KB/s)</th><th>流量(MB)</th><th>卡顿次数</th><th>卡顿占比(%)</th><th>播放时长(S)</th><th>分辨率</th><th>丢帧</th><th>状态</th><th>诊断</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in videoResults" :key="r.id">
@@ -249,12 +249,15 @@ const stClass = (s: string) => `st st-${s}`
               <td>{{ r.dns_time_ms?.toFixed(0) ?? '-' }}</td>
               <td>{{ r.tcp_time_ms?.toFixed(0) ?? '-' }}</td>
               <td>{{ r.first_play_time_ms ? (r.first_play_time_ms / 1000).toFixed(2) : '-' }}</td>
+              <td>{{ r.video_download_speed?.toFixed(1) ?? '-' }}</td>
+              <td>{{ r.video_size ? (r.video_size / 1048576).toFixed(2) : '-' }}</td>
               <td>{{ r.stutter_count ?? '-' }}</td>
               <td>{{ r.stutter_ratio?.toFixed(1) ?? '-' }}</td>
               <td>{{ r.play_duration_sec?.toFixed(0) ?? '-' }}</td>
               <td>{{ r.video_width ? r.video_width+'×'+r.video_height : '-' }}</td>
               <td>{{ r.dropped_frames ?? '-' }}</td>
-              <td><span :class="r.play_success===1 ? 'badge ok' : 'badge err'">{{ r.play_success===1 ? '成功' : '待确认' }}</span></td>
+              <td><span :class="r.play_success===1 ? 'badge ok' : 'badge err'">{{ r.play_success===1 ? '成功' : '失败' }}</span></td>
+              <td class="url-cell">{{ r.error_msg || '-' }}</td>
             </tr>
           </tbody>
         </table>

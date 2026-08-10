@@ -13,6 +13,7 @@ pub mod metrics;
 pub mod players;
 
 use std::time::Duration;
+use std::sync::Arc;
 
 use futures::StreamExt;
 use tracing::{error, info};
@@ -165,15 +166,22 @@ impl From<VideoMetrics> for VideoTestResult {
 pub struct VideoEngine {
     chrome_path: String,
     headless: bool,
+    user_data_dir: Option<String>,
     timeout: Duration,
     play_duration: Duration,
 }
 
 impl VideoEngine {
-    pub fn new(chrome_path: &str, headless: bool, timeout: Duration) -> Self {
+    pub fn new(
+        chrome_path: &str,
+        headless: bool,
+        user_data_dir: Option<String>,
+        timeout: Duration,
+    ) -> Self {
         Self {
             chrome_path: chrome_path.to_string(),
             headless,
+            user_data_dir,
             timeout,
             play_duration: Duration::from_secs(15),
         }
@@ -246,6 +254,7 @@ impl VideoEngine {
         let video_browser_config = crate::config::VideoBrowserConfig {
             path: self.chrome_path.clone(),
             headless: self.headless,
+            user_data_dir: self.user_data_dir.clone(),
         };
         let chrome = match browser::ChromiumoxideBrowser::launch(&video_browser_config).await {
             Ok(b) => {
@@ -295,6 +304,12 @@ impl VideoEngine {
         // 6. 注册 CDP 事件监听 (Media + Network + Runtime + Page)
         // 注意: 事件监听在导航前注册以确保捕获所有事件
         diag.log_phase("注册 CDP 事件监听器...");
+        page.execute(chromiumoxide::cdp::browser_protocol::network::EnableParams::default())
+            .await
+            .ok();
+        page.execute(chromiumoxide::cdp::browser_protocol::media::EnableParams::default())
+            .await
+            .ok();
 
         let tx = event_tx.clone();
         if let Ok(mut stream) = page
@@ -334,39 +349,38 @@ impl VideoEngine {
             });
         }
 
-        let tx = event_tx.clone();
+        let network_collector = Arc::new(cdp::network::NetworkCollector::new(event_tx.clone()));
+
+        let collector = network_collector.clone();
         if let Ok(mut stream) = page.event_listener::<
             chromiumoxide::cdp::browser_protocol::network::EventRequestWillBeSent
         >().await {
             tokio::spawn(async move {
-                let collector = cdp::network::NetworkCollector::new(tx.clone());
                 while let Some(event) = stream.next().await {
                     collector.handle_request_will_be_sent(event.as_ref().clone());
                 }
             });
         }
 
-        let tx = event_tx.clone();
+        let collector = network_collector.clone();
         if let Ok(mut stream) = page
             .event_listener::<chromiumoxide::cdp::browser_protocol::network::EventResponseReceived>(
             )
             .await
         {
             tokio::spawn(async move {
-                let collector = cdp::network::NetworkCollector::new(tx.clone());
                 while let Some(event) = stream.next().await {
                     collector.handle_response_received(event.as_ref().clone());
                 }
             });
         }
 
-        let tx = event_tx.clone();
+        let collector = network_collector.clone();
         if let Ok(mut stream) = page
             .event_listener::<chromiumoxide::cdp::browser_protocol::network::EventDataReceived>()
             .await
         {
             tokio::spawn(async move {
-                let collector = cdp::network::NetworkCollector::new(tx.clone());
                 while let Some(event) = stream.next().await {
                     collector.handle_data_received(event.as_ref().clone());
                 }
@@ -399,6 +413,11 @@ impl VideoEngine {
 
         diag.log_phase("CDP 事件监听器已注册");
 
+        // 在导航前注册，确保页面脚本创建播放器时 Hook 已存在。
+        let hook_manager = hooks::JSHookManager::new(page.clone());
+        diag.log_phase("注册导航前 JS Hooks...");
+        hook_manager.inject_on_new_document().await.ok();
+
         // 7. 导航
         diag.log_phase(&format!("导航: {}", url));
         if let Err(e) = page.goto(url).await {
@@ -423,7 +442,6 @@ impl VideoEngine {
         tokio::time::sleep(Duration::from_secs(2)).await;
 
         // 9. 注入 Hook
-        let hook_manager = hooks::JSHookManager::new(page.clone());
         hook_manager.dismiss_popups().await.ok();
         tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -451,23 +469,24 @@ impl VideoEngine {
         });
         info!("发现 {} 个 video 元素", video_count);
 
+        // 在触发播放前初始化收集器，否则播放事件会先进入队列但无法形成指标。
+        let mut collector = MetricCollector::new(&platform_cfg.name, &dns_result, &http_result);
+        collector.update_trigger_method(&player_name);
+
         // 11. 触发播放
         diag.log_phase("触发播放...");
         let play_js = player.and_then(|p| p.play_trigger_js());
         hook_manager.trigger_play(play_js.as_deref()).await.ok();
         tokio::time::sleep(Duration::from_secs(2)).await;
 
-        // 12. 初始化 MetricCollector
-        let mut collector = MetricCollector::new(&platform_cfg.name, &dns_result, &http_result);
-        collector.update_trigger_method(&player_name);
-
-        // 13. 主事件循环
+        // 12. 主事件循环
         diag.log_phase("进入主事件循环...");
         let play_dur = self.play_duration;
         let max_wait = Duration::from_secs(play_dur.as_secs() + 20);
         let start = std::time::Instant::now();
         let mut click_triggered = false;
         let mut poll_interval = tokio::time::interval(Duration::from_secs(1));
+        let mut last_video_state = serde_json::json!({});
 
         loop {
             tokio::select! {
@@ -478,13 +497,18 @@ impl VideoEngine {
                 }
                 _ = poll_interval.tick() => {
                     if let Ok(state) = hook_manager.poll_video_state().await {
+                        last_video_state = state.clone();
                         let ct = state.get("ct").and_then(|v| v.as_f64()).unwrap_or(0.0);
                         let vw = state.get("vw").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                         let vh = state.get("vh").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                         let vdur = state.get("vdur").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let paused = state.get("paused").and_then(|v| v.as_bool()).unwrap_or(true);
+                        let ready_state = state.get("readyState").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                        let decoded = state.get("webkitDecoded").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let dropped = state.get("webkitDropped").and_then(|v| v.as_u64()).unwrap_or(0);
                         let ended = state.get("ended").and_then(|v| v.as_bool()).unwrap_or(false);
 
-                        collector.update_stutter(ct, vw, vh, vdur);
+                        collector.update_video_state(ct, paused, ready_state, vw, vh, vdur, decoded, dropped);
 
                         if ended {
                             let _ = event_tx.send(VideoEvent::PlayEnded {
@@ -513,27 +537,35 @@ impl VideoEngine {
                         break;
                     }
 
-                    if collector.metrics.play_success {
-                        let play_elapsed = collector.engine_start.elapsed();
-                        if play_elapsed >= play_dur + Duration::from_secs(10) {
-                            diag.log_phase("播放时间已够，退出主循环");
-                            break;
-                        }
+                    if collector.metrics.play_success && collector.has_played_for(play_dur) {
+                        diag.log_phase("播放时间已够，退出主循环");
+                        break;
                     }
                 }
             }
         }
 
-        // 14. 获取截图和标题
+        // 13. 获取截图和标题
         let page_title = hook_manager.page_title().await.ok();
         collector.set_page_title(page_title.unwrap_or_default());
+
+        if !collector.metrics.play_success && collector.metrics.error.is_none() {
+            let page_text = hook_manager.page_text().await.unwrap_or_default();
+            let error = classify_playback_failure(
+                video_count,
+                &last_video_state,
+                collector.metrics.total_bytes,
+                &page_text,
+            );
+            collector.set_error(error);
+        }
 
         let screenshot = hook_manager.screenshot().await.ok();
         if let Some(ref data) = screenshot {
             collector.set_screenshot(data.clone());
         }
 
-        // 15. 最终化
+        // 14. 最终化
         let metrics = collector.finalize();
         let _ = event_tx.send(VideoEvent::MetricsFinalized {
             play_detected: metrics.play_success,
@@ -546,4 +578,54 @@ impl VideoEngine {
         diag.log_phase(&format!("测试完成: play_success={}", metrics.play_success));
         VideoTestResult::from(metrics)
     }
+}
+
+fn classify_playback_failure(
+    video_count: u32,
+    state: &serde_json::Value,
+    total_bytes: u64,
+    page_text: &str,
+) -> String {
+    if video_count == 0 {
+        return "no_video_element: 页面未发现 HTML5 video 元素".into();
+    }
+
+    let paused = state.get("paused").and_then(|v| v.as_bool()).unwrap_or(true);
+    let ready_state = state.get("readyState").and_then(|v| v.as_u64()).unwrap_or(0);
+    let network_state = state.get("networkState").and_then(|v| v.as_u64()).unwrap_or(0);
+    let current_time = state.get("ct").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let lower_text = page_text.to_lowercase();
+
+    if ["captcha", "人机验证", "安全验证", "robot check", "verify you are human"]
+        .iter()
+        .any(|keyword| lower_text.contains(keyword))
+    {
+        return "captcha_or_bot_check: 页面要求完成验证码或人机验证".into();
+    }
+    if ["log in", "login", "sign in", "登录", "请先登录"]
+        .iter()
+        .any(|keyword| lower_text.contains(keyword))
+    {
+        return "login_required: 页面要求登录后才能播放".into();
+    }
+    if ["not available in your country", "区域限制", "地区限制", "版权限制", "unavailable in your region"]
+        .iter()
+        .any(|keyword| lower_text.contains(keyword))
+    {
+        return "geo_or_rights_blocked: 视频受地区、版权或访问范围限制".into();
+    }
+
+    if total_bytes == 0 && ready_state < 2 {
+        return format!(
+            "no_media_network: 发现 video 元素但没有媒体流量或可播放数据 (readyState={ready_state}, networkState={network_state})"
+        );
+    }
+
+    if paused && current_time <= 0.0 {
+        return "autoplay_blocked: video 元素存在但播放未开始，可能需要用户手势、登录、验证码或地区授权".into();
+    }
+
+    format!(
+        "playback_not_advanced: video 元素存在但播放时间未持续推进 (currentTime={current_time:.2}, readyState={ready_state}, bytes={total_bytes})"
+    )
 }

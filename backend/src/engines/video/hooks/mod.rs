@@ -37,6 +37,22 @@ impl JSHookManager {
         Ok(())
     }
 
+    pub async fn inject_on_new_document(&self) -> anyhow::Result<()> {
+        let hooks_js = vec![
+            media_element::hook_script(),
+            network_api::hook_script(),
+            media_source::hook_script(),
+            mutation::hook_script(),
+        ];
+        for script in hooks_js {
+            self.page
+                .evaluate_on_new_document(script)
+                .await
+                .map_err(|e| anyhow::anyhow!("导航前 Hook 注入失败: {}", e))?;
+        }
+        Ok(())
+    }
+
     pub async fn trigger_play(&self, extra_js: Option<&str>) -> anyhow::Result<()> {
         let js = r#"
         (function(){
@@ -93,6 +109,15 @@ impl JSHookManager {
         let result = self.page.evaluate("document.title").await?;
         let title: String = result.into_value().unwrap_or_default();
         Ok(title)
+    }
+
+    pub async fn page_text(&self) -> anyhow::Result<String> {
+        let result = self
+            .page
+            .evaluate("document.body ? document.body.innerText.slice(0, 12000) : ''")
+            .await?;
+        let text: String = result.into_value().unwrap_or_default();
+        Ok(text)
     }
 
     pub async fn screenshot(&self) -> anyhow::Result<Vec<u8>> {

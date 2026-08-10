@@ -97,6 +97,8 @@ pub struct BrowserConfig {
 pub struct VideoBrowserConfig {
     pub path: String,
     pub headless: bool,
+    #[serde(default)]
+    pub user_data_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
