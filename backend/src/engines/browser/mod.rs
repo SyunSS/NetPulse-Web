@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::Semaphore;
 use tracing::{debug, error, info};
 
 use crate::config::BrowserConfig;
@@ -47,52 +48,106 @@ pub struct BrowserResult {
 pub struct BrowserEngine {
     chrome_config: BrowserConfig,
     timeout: Duration,
+    browser_semaphore: Arc<Semaphore>,
 }
 
 impl BrowserEngine {
-    pub fn new(chrome_config: BrowserConfig, timeout: Duration) -> Self {
+    pub fn new(
+        chrome_config: BrowserConfig,
+        timeout: Duration,
+        browser_semaphore: Arc<Semaphore>,
+    ) -> Self {
         Self {
             chrome_config,
             timeout,
+            browser_semaphore,
         }
     }
 
     /// 测试页面，采集 Performance 指标和截图
     pub async fn test_page(&self, url: &str) -> BrowserResult {
-        match tokio::time::timeout(self.timeout, self.test_page_inner(url)).await {
-            Ok(result) => result,
-            Err(_) => err_result("浏览器测试超时"),
-        }
+        info!("等待浏览器槽位: type=website url={}", url);
+        let wait_start = std::time::Instant::now();
+        let permit = match self.browser_semaphore.clone().acquire_owned().await {
+            Ok(permit) => permit,
+            Err(error) => return err_result(&format!("浏览器槽位不可用: {error}")),
+        };
+        let held_start = std::time::Instant::now();
+        info!(
+            "获得浏览器槽位: type=website url={} wait_ms={:.0}",
+            url,
+            wait_start.elapsed().as_secs_f64() * 1000.0
+        );
+
+        let result = self.test_page_with_browser_slot(url).await;
+
+        info!(
+            "释放浏览器槽位: type=website url={} held_ms={:.0}",
+            url,
+            held_start.elapsed().as_secs_f64() * 1000.0
+        );
+        drop(permit);
+        result
     }
 
-    async fn test_page_inner(&self, url: &str) -> BrowserResult {
+    async fn test_page_with_browser_slot(&self, url: &str) -> BrowserResult {
         info!("浏览器测试开始: {}", url);
         let total_start = std::time::Instant::now();
 
-        let browser = match provider::launch_browser(&self.chrome_config).await {
+        let session = match provider::launch_browser(&self.chrome_config).await {
             Ok(b) => b,
             Err(e) => {
-                error!("浏览器启动失败: {}", e);
-                return err_result(&e.to_string());
-            }
-        };
-        let page = match provider::new_page(&browser).await {
-            Ok(p) => p,
-            Err(e) => {
-                error!("创建页面失败: {}", e);
-                return err_result(&e.to_string());
+                error!("浏览器启动失败: {:#}", e);
+                return err_result(&format!("{:#}", e));
             }
         };
 
+        let result = match tokio::time::timeout(
+            self.timeout,
+            self.collect_page_metrics(url, &session, total_start),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => err_result("浏览器测试超时"),
+        };
+
+        session.shutdown().await;
+        result
+    }
+
+    async fn collect_page_metrics(
+        &self,
+        url: &str,
+        session: &crate::engines::chromium::ChromiumSession,
+        total_start: std::time::Instant,
+    ) -> BrowserResult {
+        let page = match provider::new_page(session).await {
+            Ok(p) => p,
+            Err(e) => {
+                error!("创建页面失败: {:#}", e);
+                return err_result(&format!("{:#}", e));
+            }
+        };
+
+        self.collect_from_page(url, page, total_start).await
+    }
+
+    async fn collect_from_page(
+        &self,
+        url: &str,
+        page: provider::ChromiumPage,
+        total_start: std::time::Instant,
+    ) -> BrowserResult {
         let page_collector = Arc::new(collectors::PageCollector::new());
 
         page_collector.record_navigation();
         if let Err(e) = page.navigate_to(url).await {
-            error!("导航失败: {}", e);
-            return err_result(&e.to_string());
+            error!("导航失败: {:#}", e);
+            return err_result(&format!("{:#}", e));
         }
         if let Err(e) = page.wait_for_load().await {
-            debug!("等待导航完成: {}", e);
+            debug!("等待导航完成: {:#}", e);
         }
 
         let lcp_js = collectors::NetworkCollector::lcp_inject_js();

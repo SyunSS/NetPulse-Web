@@ -12,12 +12,13 @@ pub mod hooks;
 pub mod metrics;
 pub mod players;
 
-use std::time::Duration;
 use std::sync::Arc;
+use std::time::Duration;
 
-use futures::StreamExt;
-use tracing::{error, info};
 use chromiumoxide::cdp::browser_protocol::network::SetCacheDisabledParams;
+use futures::StreamExt;
+use tokio::sync::Semaphore;
+use tracing::{error, info};
 
 use crate::config::VideoPlatformConfig;
 use crate::engines::dns::DnsEngine;
@@ -170,6 +171,7 @@ pub struct VideoEngine {
     user_data_dir: Option<String>,
     timeout: Duration,
     play_duration: Duration,
+    browser_semaphore: Arc<Semaphore>,
 }
 
 impl VideoEngine {
@@ -178,6 +180,7 @@ impl VideoEngine {
         headless: bool,
         user_data_dir: Option<String>,
         timeout: Duration,
+        browser_semaphore: Arc<Semaphore>,
     ) -> Self {
         Self {
             chrome_path: chrome_path.to_string(),
@@ -185,6 +188,7 @@ impl VideoEngine {
             user_data_dir,
             timeout,
             play_duration: Duration::from_secs(60),
+            browser_semaphore,
         }
     }
 
@@ -194,17 +198,7 @@ impl VideoEngine {
         platform_cfg: &VideoPlatformConfig,
         cookie_json: Option<serde_json::Value>,
     ) -> VideoTestResult {
-        match tokio::time::timeout(self.timeout, self.test_page_inner(url, platform_cfg, cookie_json)).await {
-            Ok(result) => result,
-            Err(_) => {
-                let mut result = VideoTestResult {
-                    platform: platform_cfg.name.clone(),
-                    ..Default::default()
-                };
-                result.error = Some("视频测试超时".into());
-                result
-            }
-        }
+        self.test_page_inner(url, platform_cfg, cookie_json).await
     }
 
     async fn test_page_inner(
@@ -253,6 +247,28 @@ impl VideoEngine {
         }
 
         // 3. 启动 Chromium
+        info!("等待浏览器槽位: type=video url={}", url);
+        let wait_start = std::time::Instant::now();
+        let permit = match self.browser_semaphore.clone().acquire_owned().await {
+            Ok(permit) => permit,
+            Err(error) => {
+                let err_msg = format!("浏览器槽位不可用: {error}");
+                error!("{}", err_msg);
+                return VideoMetrics::error_result(
+                    &platform_cfg.name,
+                    dns_result,
+                    http_result,
+                    &err_msg,
+                )
+                .into();
+            }
+        };
+        info!(
+            "获得浏览器槽位: type=video url={} wait_ms={:.0}",
+            url,
+            wait_start.elapsed().as_secs_f64() * 1000.0
+        );
+        let browser_started = std::time::Instant::now();
         diag.log_phase("启动 Chromium...");
         let video_browser_config = crate::config::VideoBrowserConfig {
             path: self.chrome_path.clone(),
@@ -265,9 +281,15 @@ impl VideoEngine {
                 b
             }
             Err(e) => {
-                let err_msg = format!("Chromium 启动失败: {}", e);
+                let err_msg = format!("Chromium 启动失败: {:#}", e);
                 diag.log_phase(&err_msg);
                 error!("{}", err_msg);
+                info!(
+                    "释放浏览器槽位: type=video url={} held_ms={:.0}",
+                    url,
+                    browser_started.elapsed().as_secs_f64() * 1000.0
+                );
+                drop(permit);
                 return VideoMetrics::error_result(
                     &platform_cfg.name,
                     dns_result,
@@ -283,9 +305,16 @@ impl VideoEngine {
         let page = match chrome.new_page().await {
             Ok(p) => p,
             Err(e) => {
-                let err_msg = format!("创建页面失败: {}", e);
+                let err_msg = format!("创建页面失败: {:#}", e);
                 diag.log_phase(&err_msg);
                 error!("{}", err_msg);
+                chrome.shutdown().await;
+                info!(
+                    "释放浏览器槽位: type=video url={} held_ms={:.0}",
+                    url,
+                    browser_started.elapsed().as_secs_f64() * 1000.0
+                );
+                drop(permit);
                 return VideoMetrics::error_result(
                     &platform_cfg.name,
                     dns_result,
@@ -425,7 +454,9 @@ impl VideoEngine {
 
         if let Some(cookies) = cookie_json.as_ref() {
             match hook_manager.set_cookies_from_json(cookies).await {
-                Ok(count) if count > 0 => diag.log_phase(&format!("已注入平台 Cookie: {} 个", count)),
+                Ok(count) if count > 0 => {
+                    diag.log_phase(&format!("已注入平台 Cookie: {} 个", count))
+                }
                 Ok(_) => diag.log_phase("未发现可注入 Cookie"),
                 Err(e) => diag.log_phase(&format!("Cookie 注入失败，继续匿名测试: {}", e)),
             }
@@ -434,12 +465,19 @@ impl VideoEngine {
         // 7. 导航
         diag.log_phase(&format!("导航: {}", url));
         if let Err(e) = page.goto(url).await {
-            let err_msg = format!("导航失败: {}", e);
+            let err_msg = format!("导航失败: {:#}", e);
             diag.log_phase(&format!("{}，检查页面是否已可用", err_msg));
             tokio::time::sleep(Duration::from_secs(2)).await;
             let usable = hook_manager.page_is_usable().await.unwrap_or(false);
             if !usable {
                 error!("{}", err_msg);
+                chrome.shutdown().await;
+                info!(
+                    "释放浏览器槽位: type=video url={} held_ms={:.0}",
+                    url,
+                    browser_started.elapsed().as_secs_f64() * 1000.0
+                );
+                drop(permit);
                 return VideoMetrics::error_result(
                     &platform_cfg.name,
                     dns_result,
@@ -483,9 +521,21 @@ impl VideoEngine {
         let registry = PlayerRegistry::new();
         let player = registry.detect(&page, url).await;
         let (player_name, play_js, play_selectors) = if let Some(p) = player {
-            (p.name().to_string(), p.play_trigger_js(), p.play_button_selectors())
+            (
+                p.name().to_string(),
+                p.play_trigger_js(),
+                p.play_button_selectors(),
+            )
         } else {
-            ("html5".to_string(), None, vec!["video".to_string(), ".play-btn".to_string(), ".btn-play".to_string()])
+            (
+                "html5".to_string(),
+                None,
+                vec![
+                    "video".to_string(),
+                    ".play-btn".to_string(),
+                    ".btn-play".to_string(),
+                ],
+            )
         };
         diag.log_phase(&format!("播放器: {}", player_name));
 
@@ -617,7 +667,15 @@ impl VideoEngine {
         });
 
         diag.log_phase(&format!("测试完成: play_success={}", metrics.play_success));
-        VideoTestResult::from(metrics)
+        let result = VideoTestResult::from(metrics);
+        chrome.shutdown().await;
+        info!(
+            "释放浏览器槽位: type=video url={} held_ms={:.0}",
+            url,
+            browser_started.elapsed().as_secs_f64() * 1000.0
+        );
+        drop(permit);
+        result
     }
 }
 
@@ -627,15 +685,30 @@ fn classify_playback_failure(
     total_bytes: u64,
     page_text: &str,
 ) -> String {
-    let paused = state.get("paused").and_then(|v| v.as_bool()).unwrap_or(true);
-    let ready_state = state.get("readyState").and_then(|v| v.as_u64()).unwrap_or(0);
-    let network_state = state.get("networkState").and_then(|v| v.as_u64()).unwrap_or(0);
+    let paused = state
+        .get("paused")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let ready_state = state
+        .get("readyState")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let network_state = state
+        .get("networkState")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     let current_time = state.get("ct").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let lower_text = page_text.to_lowercase();
 
-    if ["captcha", "人机验证", "安全验证", "robot check", "verify you are human"]
-        .iter()
-        .any(|keyword| lower_text.contains(keyword))
+    if [
+        "captcha",
+        "人机验证",
+        "安全验证",
+        "robot check",
+        "verify you are human",
+    ]
+    .iter()
+    .any(|keyword| lower_text.contains(keyword))
     {
         return "captcha_or_bot_check: 页面要求完成验证码或人机验证".into();
     }
@@ -649,14 +722,20 @@ fn classify_playback_failure(
         "请先登录",
         "会员登录",
     ]
-        .iter()
-        .any(|keyword| lower_text.contains(keyword))
+    .iter()
+    .any(|keyword| lower_text.contains(keyword))
     {
         return "login_required: 页面要求登录后才能播放".into();
     }
-    if ["not available in your country", "区域限制", "地区限制", "版权限制", "unavailable in your region"]
-        .iter()
-        .any(|keyword| lower_text.contains(keyword))
+    if [
+        "not available in your country",
+        "区域限制",
+        "地区限制",
+        "版权限制",
+        "unavailable in your region",
+    ]
+    .iter()
+    .any(|keyword| lower_text.contains(keyword))
     {
         return "geo_or_rights_blocked: 视频受地区、版权或访问范围限制".into();
     }

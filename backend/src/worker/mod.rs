@@ -17,8 +17,8 @@ use crate::engines::download::DownloadEngine;
 use crate::engines::http::HttpEngine;
 use crate::engines::ping::PingEngine;
 use crate::engines::video::VideoEngine;
-use crate::services::video_cookie_service::VideoCookieService;
 use crate::models::task::{DownloadResult, PingResult, VideoResult, WebsiteResult};
+use crate::services::video_cookie_service::VideoCookieService;
 use crate::storage::StorageManager;
 use crate::utils::response::{ProgressMessage, TaskJob};
 
@@ -31,6 +31,7 @@ pub struct TaskWorker {
     cancel_rx: tokio::sync::broadcast::Receiver<String>,
     cancellations: Arc<Mutex<std::collections::HashMap<String, CancellationToken>>>,
     semaphore: Arc<Semaphore>,
+    browser_semaphore: Arc<Semaphore>,
 }
 
 impl TaskWorker {
@@ -50,6 +51,7 @@ impl TaskWorker {
             cancel_rx,
             cancellations: Arc::new(Mutex::new(std::collections::HashMap::new())),
             semaphore: Arc::new(Semaphore::new(concurrency)),
+            browser_semaphore: Arc::new(Semaphore::new(1)),
         }
     }
 
@@ -74,13 +76,14 @@ impl TaskWorker {
                         let progress_tx = self.progress_tx.clone();
                         let cancellations = self.cancellations.clone();
                         let semaphore = self.semaphore.clone();
+                        let browser_semaphore = self.browser_semaphore.clone();
                         let task_id = job.task_id.clone();
                         tokio::spawn(async move {
                             let result = async {
                                 let _permit = semaphore.acquire_owned().await?;
                                 match job.task_type.as_str() {
-                                    "website" => run_website_task(db.clone(), config.clone(), progress_tx.clone(), job, token.clone()).await,
-                                    "video" => run_video_task(db.clone(), config.clone(), progress_tx.clone(), job, token.clone()).await,
+                                    "website" => run_website_task(db.clone(), config.clone(), progress_tx.clone(), job, token.clone(), browser_semaphore.clone()).await,
+                                    "video" => run_video_task(db.clone(), config.clone(), progress_tx.clone(), job, token.clone(), browser_semaphore.clone()).await,
                                     "download" => run_download_task(db.clone(), config.clone(), progress_tx.clone(), job, token.clone()).await,
                                     "ping" => run_ping_task(db.clone(), config.clone(), progress_tx.clone(), job, token.clone()).await,
                                     other => anyhow::bail!("不支持的任务类型: {other}"),
@@ -128,6 +131,7 @@ async fn run_website_task(
     progress_tx: broadcast::Sender<ProgressMessage>,
     job: TaskJob,
     cancel: CancellationToken,
+    browser_semaphore: Arc<Semaphore>,
 ) -> anyhow::Result<()> {
     let task_id = &job.task_id;
     let total = job.urls.len();
@@ -171,7 +175,17 @@ async fn run_website_task(
             &format!("正在测试: {}", url),
         );
 
-        match test_website_url(&db, &config, task_id, url, timeout, repeat_count).await {
+        match test_website_url(
+            &db,
+            &config,
+            task_id,
+            url,
+            timeout,
+            repeat_count,
+            browser_semaphore.clone(),
+        )
+        .await
+        {
             Ok(result) => {
                 if is_cancelled(&db, task_id, &cancel).await? {
                     return Ok(());
@@ -304,6 +318,7 @@ async fn test_website_url(
     url: &str,
     timeout: Duration,
     repeat_count: usize,
+    browser_semaphore: Arc<Semaphore>,
 ) -> anyhow::Result<WebsiteResult> {
     let mut dns_times = Vec::with_capacity(repeat_count);
     let mut dns_ok = 0usize;
@@ -354,7 +369,8 @@ async fn test_website_url(
             final_url = Some(http.final_url.clone());
         }
 
-        let browser_engine = BrowserEngine::new(config.browser.clone(), timeout);
+        let browser_engine =
+            BrowserEngine::new(config.browser.clone(), timeout, browser_semaphore.clone());
         let browser = browser_engine.test_page(url).await;
         if let Some(v) = browser.fp_ms {
             fp_times.push(v);
@@ -677,6 +693,7 @@ async fn run_video_task(
     progress_tx: broadcast::Sender<ProgressMessage>,
     job: TaskJob,
     cancel: CancellationToken,
+    browser_semaphore: Arc<Semaphore>,
 ) -> anyhow::Result<()> {
     let task_id = &job.task_id;
     let total = job.urls.len();
@@ -720,7 +737,7 @@ async fn run_video_task(
             &format!("视频测试: {}", url),
         );
 
-        match test_single_video(&db, &config, task_id, url).await {
+        match test_single_video(&db, &config, task_id, url, browser_semaphore.clone()).await {
             Ok(result) => {
                 if is_cancelled(&db, task_id, &cancel).await? {
                     return Ok(());
@@ -869,6 +886,7 @@ async fn test_single_video(
     config: &AppConfig,
     task_id: &str,
     url: &str,
+    browser_semaphore: Arc<Semaphore>,
 ) -> anyhow::Result<VideoResult> {
     let now = Utc::now().to_rfc3339();
     let result_id = Uuid::new_v4().to_string();
@@ -881,16 +899,14 @@ async fn test_single_video(
         config.video_browser.headless,
         config.video_browser.user_data_dir.clone(),
         timeout,
+        browser_semaphore.clone(),
     );
     let cookie_platform = VideoCookieService::platform_for_url(url)
         .or_else(|| VideoCookieService::normalize_platform(&platform_cfg.name));
     let cookie_json = match cookie_platform {
-        Some(platform) => VideoCookieService::load_cookie_json(
-            db,
-            &config.storage.secure_dir,
-            platform,
-        )
-        .await?,
+        Some(platform) => {
+            VideoCookieService::load_cookie_json(db, &config.storage.secure_dir, platform).await?
+        }
         None => None,
     };
     let mut video_result = video_engine
@@ -912,6 +928,7 @@ async fn test_single_video(
                 config.video_browser.headless,
                 config.video_browser.user_data_dir.clone(),
                 timeout - elapsed,
+                browser_semaphore.clone(),
             );
             let retry_result = retry_engine
                 .test_page(url, &platform_cfg, cookie_json)

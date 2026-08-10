@@ -1,13 +1,13 @@
-use anyhow::Context;
+use std::path::PathBuf;
+
 use chromiumoxide::page::Page;
-use chromiumoxide::{Browser, BrowserConfig as ChromeBrowserConfig};
-use futures::StreamExt;
 use tracing::info;
 
 use crate::config::VideoBrowserConfig;
+use crate::engines::chromium::{ChromiumArg, ChromiumSession};
 
 pub struct ChromiumoxideBrowser {
-    browser: Browser,
+    session: ChromiumSession,
 }
 
 impl ChromiumoxideBrowser {
@@ -17,43 +17,36 @@ impl ChromiumoxideBrowser {
             config.path, config.headless
         );
 
-        let mut builder = ChromeBrowserConfig::builder()
-            .no_sandbox()
-            .window_size(1920, 1080)
-            .arg("--autoplay-policy=no-user-gesture-required")
-            .arg("--mute-audio")
-            .arg("--disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies")
-            .arg("--disable-gpu")
-            .arg("--log-level=0")
-            .chrome_executable(&config.path);
+        let user_data_dir = config.user_data_dir.as_deref().map(PathBuf::from);
+        let session = ChromiumSession::launch(
+            "video",
+            &config.path,
+            config.headless,
+            user_data_dir,
+            &[
+                ChromiumArg::Value("autoplay-policy", "no-user-gesture-required"),
+                ChromiumArg::Key("mute-audio"),
+                ChromiumArg::Value(
+                    "disable-features",
+                    "PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies",
+                ),
+                ChromiumArg::Key("disable-gpu"),
+            ],
+        )
+        .await?;
 
-        if !config.headless {
-            builder = builder.with_head();
-        }
-
-        if let Some(user_data_dir) = &config.user_data_dir {
-            builder = builder.arg(format!("--user-data-dir={user_data_dir}"));
-        }
-
-        let launch_config = builder
-            .build()
-            .map_err(|e| anyhow::anyhow!("构建 BrowserConfig 失败: {}", e))?;
-
-        let (browser, mut handler) = Browser::launch(launch_config)
-            .await
-            .context("Chromiumoxide 启动失败")?;
-
-        // spawn handler in background
-        tokio::spawn(async move { while handler.next().await.is_some() {} });
-
-        info!("Chromiumoxide 启动成功");
-        Ok(Self { browser })
+        Ok(Self { session })
     }
 
     pub async fn new_page(&self) -> anyhow::Result<Page> {
-        self.browser
+        self.session
+            .browser()
             .new_page("about:blank")
             .await
-            .context("创建页面失败")
+            .map_err(|e| anyhow::anyhow!("创建页面失败: {:#}", e))
+    }
+
+    pub async fn shutdown(self) {
+        self.session.shutdown().await;
     }
 }
