@@ -26,6 +26,7 @@ const searchEnd = ref('')
 const searchStatus = ref('all')
 const autoRefresh = ref(true)
 const loadError = ref('')
+const hasLoadedRuns = ref(false)
 let refreshTimer: number | null = null
 
 function parseTaskIds(ids: string): string[] {
@@ -33,9 +34,14 @@ function parseTaskIds(ids: string): string[] {
 }
 
 async function fetchTaskMeta(ids: string[]) {
-  await Promise.all(ids.map(async (tid) => {
-    const res = await http.get(`/task/${tid}`)
-    taskMeta.value[tid] = { id: tid, type: res.data.task_type, status: res.data.status }
+  const uniqueIds = Array.from(new Set(ids))
+  await Promise.all(uniqueIds.map(async (tid) => {
+    try {
+      const res = await http.get(`/task/${tid}`)
+      taskMeta.value[tid] = { id: tid, type: res.data.task_type, status: res.data.status }
+    } catch {
+      delete taskMeta.value[tid]
+    }
   }))
 }
 
@@ -51,20 +57,20 @@ function handleWsMessage(msg: ProgressMessage) {
 
 async function fetchRuns() {
   loadError.value = ''
-  planStore.planRuns = []
-  taskMeta.value = {}
   try {
     const params: any = {}
     if (searchStart.value) params.start = new Date(searchStart.value).toISOString()
     if (searchEnd.value) params.end = new Date(searchEnd.value + 'T23:59:59').toISOString()
     const res = await planStore.fetchPlanRuns(planId.value, params)
-    const ids = res.flatMap(run => parseTaskIds(run.task_ids))
+    const ids = Array.from(new Set(res.flatMap(run => parseTaskIds(run.task_ids))))
     taskMeta.value = Object.fromEntries(Object.entries(taskMeta.value).filter(([id]) => ids.includes(id)))
-    for (const run of res) {
-      const ids = parseTaskIds(run.task_ids)
-      if (ids.length) await fetchTaskMeta(ids)
+    if (ids.length) await fetchTaskMeta(ids)
+    hasLoadedRuns.value = true
+  } catch (e) {
+    if (!hasLoadedRuns.value || planStore.planRuns.length === 0) {
+      loadError.value = getErrorMessage(e, '加载运行历史失败')
     }
-  } catch (e) { loadError.value = getErrorMessage(e, '加载运行历史失败') }
+  }
 }
 
 const filteredRuns = () => {
@@ -142,6 +148,9 @@ async function exportRun(runId: string, format: 'xlsx' | 'csv' | 'json') {
 
 onMounted(async () => {
   try {
+    planStore.planRuns = []
+    taskMeta.value = {}
+    hasLoadedRuns.value = false
     await planStore.fetchPlan(planId.value)
     await fetchRuns()
   } catch (e) { loadError.value = getErrorMessage(e, '加载计划失败') }
@@ -157,6 +166,7 @@ watch(planId, async (id, oldId) => {
   if (id === oldId) return
   taskMeta.value = {}
   planStore.planRuns = []
+  hasLoadedRuns.value = false
   try {
     await planStore.fetchPlan(id)
     await fetchRuns()

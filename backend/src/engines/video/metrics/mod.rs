@@ -62,6 +62,7 @@ pub struct MetricCollector {
     play_request_time: Option<std::time::Instant>,
     // 网络速度采样
     last_bytes_sample_time: std::time::Instant,
+    first_byte_time: Option<std::time::Instant>,
     current_sample_bytes: u64,
     peak_bps: f64,
     // 卡顿
@@ -90,6 +91,7 @@ impl MetricCollector {
             first_play_elapsed: None,
             play_request_time: None,
             last_bytes_sample_time: std::time::Instant::now(),
+            first_byte_time: None,
             current_sample_bytes: 0,
             peak_bps: 0.0,
             last_current_time: 0.0,
@@ -194,9 +196,12 @@ impl MetricCollector {
                 }
             }
             VideoEvent::BytesReceived { bytes, .. } => {
+                let now = std::time::Instant::now();
+                if *bytes > 0 && self.first_byte_time.is_none() {
+                    self.first_byte_time = Some(now);
+                }
                 self.metrics.total_bytes += bytes;
                 self.current_sample_bytes += bytes;
-                let now = std::time::Instant::now();
                 let sample_elapsed = now.duration_since(self.last_bytes_sample_time);
                 if sample_elapsed.as_secs_f64() >= 1.0 {
                     let bps = self.current_sample_bytes as f64 / sample_elapsed.as_secs_f64();
@@ -333,11 +338,13 @@ impl MetricCollector {
         // 下载速度
         let elapsed = self.engine_start.elapsed().as_secs_f64();
         if self.metrics.total_bytes > 0 && elapsed > 0.0 {
-            let speed_elapsed = self.play_duration();
-            if speed_elapsed > 0.0 {
-                self.metrics.download_speed =
-                    Some(self.metrics.total_bytes as f64 / speed_elapsed / 1024.0);
-            }
+            let speed_elapsed = self
+                .first_byte_time
+                .map(|start| start.elapsed().as_secs_f64())
+                .unwrap_or(elapsed)
+                .max(1.0);
+            self.metrics.download_speed =
+                Some(self.metrics.total_bytes as f64 / speed_elapsed / 1024.0);
         }
         if self.peak_bps > 0.0 {
             self.metrics.peak_speed = Some(self.peak_bps / 1024.0);

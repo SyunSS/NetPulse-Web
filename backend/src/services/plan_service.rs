@@ -493,8 +493,9 @@ impl PlanService {
                     query = query.bind(task_id);
                 }
                 query.execute(db).await?;
+            } else {
+                anyhow::bail!("运行中的子任务已取消，请完成协调后再删除运行记录");
             }
-            anyhow::bail!("运行中的子任务已取消，请完成协调后再删除运行记录");
         }
 
         // 强制模式: 删除关联的所有 task 及其结果
@@ -577,6 +578,51 @@ impl PlanService {
         let mut results = Vec::new();
         for mut run in runs {
             let task_ids: Vec<String> = serde_json::from_str(&run.task_ids).unwrap_or_default();
+            let had_task_ids = !task_ids.is_empty();
+            let original_task_count = task_ids.len();
+            let existing_task_ids = if task_ids.is_empty() {
+                Vec::new()
+            } else {
+                let placeholders: Vec<String> = task_ids
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| format!("?{}", i + 1))
+                    .collect();
+                let query = format!(
+                    "SELECT id FROM test_task WHERE id IN ({})",
+                    placeholders.join(",")
+                );
+                let mut q = sqlx::query_scalar::<_, String>(&query);
+                for task_id in &task_ids {
+                    q = q.bind(task_id);
+                }
+                let existing_ids = q.fetch_all(db).await?;
+                task_ids
+                    .into_iter()
+                    .filter(|task_id| existing_ids.iter().any(|id| id == task_id))
+                    .collect()
+            };
+
+            if had_task_ids && existing_task_ids.is_empty() {
+                sqlx::query("DELETE FROM task_plan_runs WHERE id = ? AND plan_id = ?")
+                    .bind(&run.id)
+                    .bind(plan_id)
+                    .execute(db)
+                    .await?;
+                continue;
+            }
+
+            if existing_task_ids.len() != original_task_count {
+                run.task_ids = serde_json::to_string(&existing_task_ids)?;
+                sqlx::query("UPDATE task_plan_runs SET task_ids = ? WHERE id = ? AND plan_id = ?")
+                    .bind(&run.task_ids)
+                    .bind(&run.id)
+                    .bind(plan_id)
+                    .execute(db)
+                    .await?;
+            }
+
+            let task_ids = existing_task_ids;
             let task_count = task_ids.len();
             let completed_count = if task_count > 0 {
                 let placeholders: Vec<String> = task_ids
