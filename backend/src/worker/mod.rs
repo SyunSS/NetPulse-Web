@@ -918,9 +918,11 @@ async fn test_single_video(
                 .await;
             if retry_result.play_success {
                 video_result = retry_result;
-            } else if let (Some(first), Some(second)) = (&video_result.error, &retry_result.error) {
+            } else if let (Some(first), Some(second)) =
+                (video_result.error.clone(), retry_result.error.clone())
+            {
                 video_result = retry_result;
-                video_result.error = Some(format!("重试一次仍失败: 首次={}, 重试={}", first, second));
+                video_result.error = Some(format!("重试一次仍失败: 首次={first}, 重试={second}"));
             } else {
                 video_result = retry_result;
             }
