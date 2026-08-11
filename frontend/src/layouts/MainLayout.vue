@@ -65,6 +65,6 @@ watch(() => route.fullPath, () => { mobileOpen.value = false })
 </style>
 
 <style scoped>
-@media (max-width:760px) { .app-layout { display:block; }.sidebar-slot { width:0; }.main-container { min-height:100vh; }.topbar { position:sticky; top:0; z-index:10; }.topbar-left { min-width:0; gap:10px; }.topbar-context { min-width:0; }.page-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:58vw; }.topbar-right { gap:8px; }.theme-btn { width:34px; height:34px; }.content { min-height:calc(100vh - 64px); } }
+@media (max-width:760px) { .app-layout { display:block; }.sidebar-slot { width:0; }.app-layout .sidebar-slot.mobile-open { width:min(280px,88vw); }.main-container { min-height:100vh; }.topbar { position:sticky; top:0; z-index:10; }.topbar-left { min-width:0; gap:10px; }.topbar-context { min-width:0; }.page-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:58vw; }.topbar-right { gap:8px; }.theme-btn { width:34px; height:34px; }.content { min-height:calc(100vh - 64px); } }
 @media (max-width:390px) { .topbar { padding:0 12px; }.topbar-eyebrow { display:none; }.page-title { max-width:62vw; font-size:16px; }.content { padding:16px 10px 24px; } }
 </style>
