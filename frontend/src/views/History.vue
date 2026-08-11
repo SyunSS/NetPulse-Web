@@ -120,6 +120,10 @@ onMounted(() => { fetchTasks() })
 
 <template>
   <div class="history">
+    <div class="view-intro">
+      <div><div class="section-eyebrow">task archive / retained signals</div><h1>历史记录</h1><p>检索每一次探测的状态、进度与结果。</p></div>
+      <div class="archive-total"><b>{{ total }}</b><span>条任务</span></div>
+    </div>
     <div class="page-header">
       <h1 class="page-title">历史记录</h1>
       <div class="header-actions">
@@ -200,4 +204,10 @@ onMounted(() => { fetchTasks() })
 .empty-text { text-align: center; padding: 40px; color: var(--text-tertiary); }
 .error-text { color: var(--color-danger); }
 .pagination { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 16px; }
+</style>
+
+<style scoped>
+.view-intro { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; margin-bottom:25px; }.view-intro h1 { margin-top:8px; color:var(--text-primary); font-family:var(--font-display); font-size:clamp(30px,4vw,43px); font-weight:500; letter-spacing:-.06em; line-height:1; }.view-intro p { margin-top:10px; color:var(--text-secondary); font-size:13px; }.section-eyebrow { color:var(--color-primary); font-family:var(--font-mono); font-size:9px; letter-spacing:.14em; text-transform:uppercase; }.archive-total { display:flex; align-items:baseline; gap:8px; color:var(--text-tertiary); font-family:var(--font-mono); font-size:9px; }.archive-total b { color:var(--color-primary); font-size:26px; font-weight:500; letter-spacing:-.08em; }
+.page-header { padding:10px; margin-bottom:12px; border:1px solid var(--border-color); border-radius:10px; background:rgba(15,32,50,.55); }.page-header .page-title { display:none; }.filter-select,.btn { height:34px; border-color:var(--border-color); border-radius:5px; background:var(--bg-input); color:var(--text-primary); font-family:var(--font-mono); font-size:10px; }.btn:hover { border-color:var(--border-color-hover); background:var(--bg-hover); }.btn.danger { border-color:var(--color-danger); background:var(--color-danger); color:#25120d; }.dt { overflow:hidden; border:1px solid var(--border-color); border-radius:10px; background:var(--bg-card); }.dt th,.dt td { padding:13px 14px; border-bottom-color:var(--border-color); }.dt th { background:var(--bg-elevated); color:var(--text-tertiary); font-family:var(--font-mono); font-size:9px; font-weight:500; letter-spacing:.05em; text-transform:uppercase; }.dt td { color:var(--text-secondary); font-size:12px; }.dt tbody tr { transition:background var(--transition-fast); }.dt tbody tr:hover td { background:var(--bg-hover); }.dt td code { padding:3px 5px; border:1px solid var(--border-color); border-radius:3px; background:var(--bg-alt); font-size:10px; }.action-col .link { color:var(--color-primary); font-family:var(--font-mono); font-size:10px; }.action-col .link.danger { color:var(--color-danger); }.empty-text { border:1px dashed var(--border-color); border-radius:10px; color:var(--text-tertiary); }.filter-scope { font-family:var(--font-mono); }.pagination { font-family:var(--font-mono); font-size:10px; }
+@media (max-width:650px) { .view-intro { align-items:flex-start; flex-direction:column; }.page-header { align-items:stretch; }.header-actions { width:100%; }.filter-select,.header-actions .btn { flex:1; min-width:0; }.dt { display:block; overflow-x:auto; white-space:nowrap; } }
 </style>

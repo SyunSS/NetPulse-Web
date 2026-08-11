@@ -97,6 +97,10 @@ async function reload() {
 
 <template>
   <div class="plans-page">
+    <div class="view-intro">
+      <div><div class="section-eyebrow">probe schedules / control</div><h1>测试计划</h1><p>把重复的网络探测变成稳定、可追踪的信号。</p></div>
+      <div class="view-counter"><b>{{ planStore.total }}</b><span>配置中的计划</span></div>
+    </div>
     <!-- 工具栏 -->
     <div class="toolbar">
       <div class="search-box">
@@ -489,4 +493,16 @@ async function reload() {
 }
 
 .error-state { color: var(--color-danger); }
+</style>
+
+<style scoped>
+.view-intro { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; margin-bottom:28px; }
+.view-intro h1 { margin-top:8px; color:var(--text-primary); font-family:var(--font-display); font-size:clamp(30px,4vw,43px); font-weight:500; letter-spacing:-.06em; line-height:1; }
+.view-intro p { margin-top:10px; color:var(--text-secondary); font-size:13px; }
+.section-eyebrow { color:var(--color-primary); font-family:var(--font-mono); font-size:9px; letter-spacing:.14em; text-transform:uppercase; }
+.view-counter { display:flex; align-items:baseline; gap:8px; padding-bottom:3px; color:var(--text-tertiary); font-family:var(--font-mono); font-size:9px; }.view-counter b { color:var(--color-primary); font-size:25px; font-weight:500; letter-spacing:-.08em; }
+.toolbar { align-items:center; padding:10px; border:1px solid var(--border-color); border-radius:10px; background:rgba(15,32,50,.55); }
+.search-box { max-width:460px; }.search-input { height:38px; border-color:var(--border-color); border-radius:6px; background:var(--bg-input); }.search-input:focus { border-color:var(--color-primary); box-shadow:0 0 0 3px var(--color-primary-bg); }.primary-btn { height:38px; border:1px solid var(--color-primary); border-radius:6px; background:var(--color-primary); color:#06201f; font-family:var(--font-mono); font-size:11px; }.primary-btn:hover { background:var(--color-primary-active); box-shadow:var(--shadow-glow); }
+.plan-grid { gap:12px; }.plan-card { position:relative; overflow:hidden; border-color:var(--border-color); border-radius:10px; background:linear-gradient(145deg,var(--bg-card),rgba(15,32,50,.76)); box-shadow:var(--shadow-card); transition:transform var(--transition-fast),border-color var(--transition-fast),box-shadow var(--transition-fast); }.plan-card::before { position:absolute; top:0; right:0; left:0; height:2px; background:var(--color-primary); opacity:.45; content:''; }.plan-card:hover { border-color:var(--border-bright); box-shadow:var(--shadow-card),var(--shadow-glow); transform:translateY(-2px); }.plan-title h3 { font-family:var(--font-display); font-weight:600; letter-spacing:-.03em; }.plan-desc { color:var(--text-secondary); }.plan-items { border:1px solid var(--border-color); background:var(--bg-alt); }.plan-item { color:var(--text-secondary); }.item-type { color:var(--text-primary); }.plan-schedule { border:1px dashed var(--border-color); background:rgba(97,231,210,.035); }.schedule-cron { color:var(--color-primary); }.plan-actions { border-top-color:var(--border-color); }.action-btn { border-color:var(--border-color); border-radius:5px; background:transparent; color:var(--text-secondary); font-family:var(--font-mono); font-size:10px; }.action-btn.primary { border-color:var(--color-primary); background:var(--color-primary); color:#06201f; }.action-btn.primary:hover { background:var(--color-primary-active); }.action-btn.danger:hover { background:var(--color-danger); border-color:var(--color-danger); }.status-tag { font-family:var(--font-mono); font-size:9px; }
+@media (max-width:650px) { .view-intro { align-items:flex-start; flex-direction:column; }.view-counter { padding:0; }.toolbar { flex-direction:column; align-items:stretch; }.search-box { max-width:none; }.primary-btn { width:100%; }.plan-grid { grid-template-columns:1fr; } }
 </style>

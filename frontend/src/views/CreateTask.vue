@@ -97,7 +97,10 @@ async function doCreate() {
 
 <template>
   <div class="create-task">
-    <h1 class="page-title">创建测试任务</h1>
+    <div class="view-intro">
+      <div><div class="section-eyebrow">new probe / manual or batch</div><h1>创建探测</h1><p>选择一个测试引擎，向网络发出一条可读的信号。</p></div>
+      <div class="probe-status"><span></span><b>READY</b><small>engine pool available</small></div>
+    </div>
 
     <n-card class="tpl-card">
       <div class="tpl-row">
@@ -146,7 +149,7 @@ async function doCreate() {
             <n-upload :multiple="false" accept=".json" :show-file-list="false" @change="handleFileChange">
               <n-upload-dragger>
                 <div style="text-align:center;padding:24px">
-                  <n-icon size="36" color="var(--primary-color)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></n-icon>
+                   <n-icon size="36" color="var(--color-primary)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></n-icon>
                   <p style="margin:8px 0 4px;font-weight:500">拖拽 JSON 文件到此处</p>
                   <p style="margin:0;font-size:12px;color:var(--n-text-color-3)"><n-button text type="primary" @click.stop="downloadTemplateFile" size="tiny">下载模板</n-button> 获取示例</p>
                 </div>
@@ -169,4 +172,9 @@ async function doCreate() {
 .tpl-row { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px }
 .tpl-row h3 { margin:0 0 4px } .tpl-row p { margin:0; color:var(--text-tertiary); font-size:13px }
 .tpl-tags { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap }
+</style>
+
+<style scoped>
+.view-intro { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; margin-bottom:26px; }.section-eyebrow { color:var(--color-primary); font-family:var(--font-mono); font-size:9px; letter-spacing:.14em; text-transform:uppercase; }.view-intro h1 { margin-top:8px; color:var(--text-primary); font-family:var(--font-display); font-size:clamp(30px,4vw,43px); font-weight:500; letter-spacing:-.06em; line-height:1; }.view-intro p { margin-top:10px; color:var(--text-secondary); font-size:13px; }.probe-status { display:flex; align-items:center; gap:7px; padding-bottom:4px; color:var(--color-primary); font-family:var(--font-mono); font-size:10px; }.probe-status span { width:6px; height:6px; border-radius:50%; background:var(--color-primary); box-shadow:0 0 9px var(--color-primary); }.probe-status small { color:var(--text-tertiary); font-size:8px; }.create-task :deep(.n-card) { border-color:var(--border-color); border-radius:10px; background:linear-gradient(145deg,var(--bg-card),rgba(15,32,50,.75)); box-shadow:var(--shadow-card); }.create-task :deep(.n-card-header) { color:var(--text-primary); font-family:var(--font-display); }.create-task :deep(.n-card__content) { color:var(--text-secondary); }.create-task :deep(.n-divider) { border-color:var(--border-color); }.create-task :deep(.n-text) { color:var(--text-secondary); }.tpl-card { border-left:2px solid var(--color-primary) !important; background:linear-gradient(100deg,rgba(97,231,210,.1),var(--bg-card)) !important; }.tpl-row h3 { color:var(--text-primary); font-family:var(--font-display); font-weight:600; }.tpl-row p { color:var(--text-secondary); }.create-task :deep(.n-button) { font-family:var(--font-mono); font-size:10px; }.create-task :deep(.n-radio-group) { gap:8px; }.create-task :deep(.n-radio) { padding:8px 10px; border:1px solid var(--border-color); border-radius:5px; background:var(--bg-input); }.create-task :deep(.n-radio--checked) { border-color:var(--border-bright); background:var(--color-primary-bg); }.create-task :deep(.n-input),.create-task :deep(.n-input-number),.create-task :deep(.n-upload-trigger) { border-color:var(--border-color); }.create-task :deep(.n-input:hover),.create-task :deep(.n-input:focus-within) { border-color:var(--border-color-hover); }.create-task :deep(.n-upload-dragger) { border-color:var(--border-color); background:rgba(97,231,210,.025); }.create-task :deep(.n-upload-dragger:hover) { border-color:var(--color-primary); background:var(--color-primary-bg); }.create-task :deep(.n-code) { border:1px solid var(--border-color); background:var(--bg-alt); }.create-task :deep(.n-tag) { font-family:var(--font-mono); font-size:9px; }
+@media (max-width:650px) { .view-intro { align-items:flex-start; flex-direction:column; }.probe-status { padding:0; }.create-task :deep(.n-grid) { --n-cols:1 !important; } }
 </style>
