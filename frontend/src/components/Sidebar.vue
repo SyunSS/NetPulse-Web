@@ -121,3 +121,7 @@ const handleLogout = () => { authStore.logout(); router.push('/login') }
 
 @media (max-width: 760px) { .sidebar { position: fixed; z-index: 20; width: min(248px, 86vw); transform: translateX(-100%); box-shadow: 24px 0 60px rgba(0,0,0,.3); }.sidebar.mobile-open { transform: translateX(0); } }
 </style>
+
+<style scoped>
+@media (max-width:760px) { .sidebar { width:min(280px,88vw); max-width:88vw; }.sidebar-header { padding:22px 18px 20px; }.sidebar-nav { padding:0 10px; }.nav-item { min-height:48px; }.sidebar-footer { padding:0 14px 16px; } }
+</style>

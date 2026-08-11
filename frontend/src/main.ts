@@ -8,10 +8,10 @@ import { useDark } from './utils/theme'
 
 const lightOverrides = {
   common: {
-    primaryColor: '#138f88',
-    primaryColorHover: '#0f766f',
-    primaryColorPressed: '#0b5d58',
-    primaryColorSuppl: '#61cfc4',
+    primaryColor: '#087a74',
+    primaryColorHover: '#065f5a',
+    primaryColorPressed: '#044c48',
+    primaryColorSuppl: '#087a74',
     borderRadius: '8px',
     fontFamily: "'DM Sans', 'PingFang SC', 'Microsoft YaHei', sans-serif",
     fontSize: '14px',
@@ -28,7 +28,7 @@ const lightOverrides = {
     tableColor: '#f9fcfd',
     tableHeaderColor: '#e6eef4',
     actionColor: '#e6eef4',
-    successColor: '#138f88',
+    successColor: '#087a74',
     warningColor: '#c97916',
     errorColor: '#d75d41',
   },

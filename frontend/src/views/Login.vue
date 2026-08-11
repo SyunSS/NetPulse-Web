@@ -72,3 +72,8 @@ async function handleSubmit() {
 @media (max-width: 850px) { .login-page { grid-template-columns: 1fr; max-width: 600px; margin: 0 auto; padding: 32px 22px 42px; }.login-signal { justify-self: start; }.signal-kicker { margin-top: 65px; }.terminal-card { margin-top: 30px; }.login-card { margin-top: 12px; } }
 @media (max-width: 520px) { .login-page { display: block; min-height: 100vh; padding: 28px 16px 32px; }.login-signal h1 { font-size: 62px; }.signal-kicker { margin-top: 56px; }.login-signal > p { font-size: 13px; }.terminal-card { margin-top: 28px; }.login-card { margin-top: 22px; padding: 25px 20px; }.login-card h2 { margin-top: 31px; }.login-footer { flex-wrap: wrap; }.login-footer span:last-child { width: 100%; } }
 </style>
+
+<style scoped>
+@media (max-width:760px) { .login-page { display:block; min-height:100vh; overflow-y:auto; padding:28px 18px 34px; }.login-grid { opacity:.45; mask-image:none; }.login-orbit { display:none; }.login-signal { max-width:none; }.login-brand { font-size:16px; }.signal-kicker { margin-top:38px; }.login-signal h1 { font-size:clamp(46px,17vw,70px); line-height:.92; }.login-signal > p { max-width:none; margin-top:16px; line-height:1.65; }.terminal-card { margin-top:22px; }.login-card { margin-top:20px; }.login-card h2 { margin-top:28px; }.login-card form { margin-top:24px; }.login-footer { margin-top:28px; } }
+@media (max-width:430px) { .login-page { padding:22px 14px 28px; }.terminal-card { display:none; }.login-card { padding:22px 17px; }.login-card-header { align-items:flex-start; gap:10px; flex-direction:column; }.input-wrap { height:42px; }.submit-btn { height:44px; } }
+</style>

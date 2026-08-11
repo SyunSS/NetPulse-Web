@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, h } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch, h } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePlanStore } from '@/stores/plan'
 import { useTaskStore } from '@/stores/task'
 import { getErrorMessage } from '@/api/index'
 import { formatMs, formatTime } from '@/utils'
+import { useDark } from '@/utils/theme'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -17,6 +18,25 @@ const router = useRouter()
 const planStore = usePlanStore()
 const taskStore = useTaskStore()
 const dashboardError = ref('')
+const { isDark } = useDark()
+
+const chartTheme = computed(() => isDark.value
+  ? {
+      palette: ['#61e7d2', '#88a9ff', '#ffb454'],
+      tooltipBg: '#12263a',
+      tooltipText: '#edf6ff',
+      muted: '#9bb0c2',
+      axis: '#61788e',
+      split: 'rgba(136,169,201,0.12)',
+    }
+  : {
+      palette: ['#087a74', '#3457b1', '#9f620a'],
+      tooltipBg: '#ffffff',
+      tooltipText: '#102033',
+      muted: '#4e687d',
+      axis: '#7890a2',
+      split: 'rgba(27,70,98,0.14)',
+    })
 
 const trendOption = ref<any>({
   color: ['#61e7d2', '#88a9ff', '#ffb454'],
@@ -50,6 +70,24 @@ const pieOption = ref<any>({
     emphasis: { label: { show: true, fontSize: 16, fontWeight: 'bold' } },
   }],
 })
+
+function applyChartTheme() {
+  const t = chartTheme.value
+  trendOption.value = {
+    ...trendOption.value,
+    color: t.palette,
+    tooltip: { ...trendOption.value.tooltip, backgroundColor: t.tooltipBg, borderColor: t.split, textStyle: { color: t.tooltipText } },
+    legend: { ...trendOption.value.legend, textStyle: { color: t.muted, fontSize: 11 } },
+    xAxis: { ...trendOption.value.xAxis, axisLabel: { ...trendOption.value.xAxis.axisLabel, color: t.axis } },
+    yAxis: { ...trendOption.value.yAxis, nameTextStyle: { color: t.axis, fontSize: 10 }, axisLabel: { ...trendOption.value.yAxis.axisLabel, color: t.axis }, splitLine: { lineStyle: { color: t.split, type: 'dashed' } } },
+  }
+  pieOption.value = {
+    ...pieOption.value,
+    color: t.palette,
+    tooltip: { ...pieOption.value.tooltip, backgroundColor: t.tooltipBg, borderColor: t.split, textStyle: { color: t.tooltipText } },
+    legend: { ...pieOption.value.legend, textStyle: { color: t.muted, fontSize: 11 } },
+  }
+}
 
 function updateCharts(stats: any) {
   trendOption.value = {
@@ -101,6 +139,8 @@ onUnmounted(() => {
 watch(() => taskStore.dashboardStats, (stats) => {
   if (stats) updateCharts(stats)
 })
+
+watch(isDark, applyChartTheme, { immediate: true })
 
 // 下次执行时间排序
 const upcomingPlans = () => {
@@ -189,4 +229,8 @@ const totalItems = () => planStore.plans.reduce((sum, p) => sum + p.items.length
 .load-error { margin-bottom: 12px; padding: 11px 14px; border: 1px solid rgba(255,138,101,.35); border-radius: var(--radius-md); color: var(--color-danger); background: rgba(255,138,101,.08); font-size: 12px; }.link-btn { border: 0; background: transparent; color: var(--color-primary); cursor: pointer; font-size: 12px; }
 @media (max-width: 1050px) { .signal-grid { grid-template-columns: repeat(2, 1fr); }.health-panel { grid-column: span 2; }.telemetry-grid { grid-template-columns: 1fr; } }
 @media (max-width: 650px) { .dashboard-intro { display: block; padding-bottom: 22px; }.intro-actions { justify-content: space-between; margin-top: 22px; }.signal-grid, .bottom-grid { grid-template-columns: 1fr; }.health-panel { grid-column: auto; }.health-panel, .metric-panel { min-height: 155px; }.chart-panel, .distribution-panel, .list-panel { padding: 16px; }.trend-chart { height: 220px; }.chart-legend { flex-wrap: wrap; gap: 10px; }.chart-unit { width: 100%; margin-left: 0; }.topbar + .content {} }
+</style>
+
+<style scoped>
+@media (max-width:650px) { .intro-copy h2 { font-size:34px; }.intro-actions { align-items:stretch; flex-direction:column; }.signal-button { width:100%; }.health-main { align-items:flex-start; gap:18px; flex-direction:column; }.health-ring { width:68px; height:68px; }.panel-heading { gap:10px; flex-direction:column; }.live-chip { align-self:flex-start; }.latency-strip { grid-template-columns:1fr; }.upcoming-item,.recent-plan-item { min-height:54px; } }
 </style>
